@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StockPulse 热门股雷达</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e5e7eb;
+  --accent: #2563eb; --up: #0f9d58; --down: #d93025; --warn: #b7791f; --chip: #eef2ff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117; --panel: #161b22; --text: #e6edf3; --muted: #8b949e; --line: #30363d;
+    --accent: #58a6ff; --up: #3fb950; --down: #f85149; --warn: #d29922; --chip: #1f2a44;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1117; --panel: #161b22; --text: #e6edf3; --muted: #8b949e; --line: #30363d;
+  --accent: #58a6ff; --up: #3fb950; --down: #f85149; --warn: #d29922; --chip: #1f2a44;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line);
+  background: var(--panel); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+header h1 { font-size: 18px; margin: 0; }
+header .meta { color: var(--muted); font-size: 12px; }
+header .spacer { flex: 1; }
+button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 7px 12px; cursor: pointer; font: inherit; }
+button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+button:disabled { opacity: .5; cursor: default; }
+main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 16px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+.card h2 { font-size: 15px; margin: 0 0 10px; }
+.overview { grid-column: 1 / -1; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip { background: var(--chip); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; border: 1px solid currentColor; }
+.b-bull { color: var(--up); } .b-bear { color: var(--down); } .b-warn { color: var(--warn); } .b-neutral { color: var(--muted); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+tr.row { cursor: pointer; } tr.row:hover { background: var(--chip); }
+td.summary { white-space: normal; min-width: 280px; color: var(--muted); font-size: 13px; }
+.num { font-variant-numeric: tabular-nums; }
+.up { color: var(--up); } .down { color: var(--down); }
+.scorebar { position: relative; width: 70px; height: 8px; background: var(--line); border-radius: 4px; display: inline-block; vertical-align: middle; margin-left: 6px; }
+.scorebar > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 4px; }
+.news-item { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.news-item a { color: var(--text); text-decoration: none; } .news-item a:hover { color: var(--accent); }
+.news-meta { color: var(--muted); font-size: 12px; }
+.tick { font-weight: 600; color: var(--accent); margin-right: 4px; }
+#drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100%); background: var(--panel);
+  border-left: 1px solid var(--line); transform: translateX(100%); transition: transform .2s; z-index: 10; overflow-y: auto; padding: 20px 16px; }
+#drawer.open { transform: none; }
+#drawer h3 { margin: 0 0 4px; font-size: 20px; }
+.kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+.kv div { background: var(--bg); border-radius: 8px; padding: 8px; }
+.kv b { display: block; font-size: 16px; }
+.kv b span { font-size: inherit; }
+.kv span { color: var(--muted); font-size: 12px; }
+.comp { display: grid; grid-template-columns: 70px 1fr 40px; align-items: center; gap: 6px; font-size: 12px; margin: 4px 0; }
+.comp .bar { height: 6px; background: var(--line); border-radius: 3px; position: relative; }
+.comp .bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 3px; }
+.empty { color: var(--muted); padding: 24px 0; text-align: center; }
+.disclaimer { grid-column: 1 / -1; color: var(--muted); font-size: 12px; text-align: center; }
+svg.spark { vertical-align: middle; }
+#news { max-height: 960px; overflow-y: auto; }
+@media (max-width: 600px) {
+  header { position: static; padding: 12px 16px; }
+  main { padding: 12px 16px; }
+  .kv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>📈 StockPulse 热门股雷达</h1>
+  <span class="meta" id="meta">加载中…</span>
+  <span class="spacer"></span>
+  <span class="meta" id="status"></span>
+  <button class="ghost" id="themeBtn" title="切换主题" aria-label="切换主题">🌓</button>
+  <button id="refreshBtn">立即刷新</button>
+</header>
+<main>
+  <section class="card overview">
+    <h2>🧭 市场看法 <span class="meta" id="engine"></span></h2>
+    <div id="overview" class="empty">暂无数据，首次分析进行中…</div>
+    <div class="chips" id="themes"></div>
+  </section>
+  <section class="card">
+    <h2>🔥 热门涨股榜（24 小时）</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>代码</th><th>热度</th><th>信号</th><th>价格</th><th>日涨跌</th><th>走势</th><th>提及</th><th>情绪</th><th>看法</th></tr></thead>
+        <tbody id="rank"></tbody>
+      </table>
+    </div>
+  </section>
+  <section class="card">
+    <h2>👀 关注列表</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>代码</th><th>热度</th><th>价格</th><th>日涨跌</th><th>情绪</th></tr></thead>
+      <tbody id="watch"></tbody>
+    </table></div>
+    <h2 style="margin-top:18px">📰 最新资讯</h2>
+    <div id="news"></div>
+  </section>
+  <p class="disclaimer">数据来自公开新闻 RSS、Reddit、StockTwits 与 Yahoo Finance，由程序自动分析生成，仅供参考，不构成任何投资建议。</p>
+</main>
+<aside id="drawer"></aside>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pct = (v) => v == null ? "—" : `<span class="${v >= 0 ? "up" : "down"} num">${v >= 0 ? "+" : ""}${v.toFixed(2)}%</span>`;
+const money = (v) => v == null ? "—" : `<span class="num">$${v.toFixed(2)}</span>`;
+const sent = (v) => `<span class="${v > 0.05 ? "up" : v < -0.05 ? "down" : ""} num">${v >= 0 ? "+" : ""}${(v ?? 0).toFixed(2)}</span>`;
+const VIEW = { bullish: ["看涨", "b-bull"], bearish: ["看空", "b-bear"], neutral: ["中性", "b-neutral"] };
+function signalBadge(s) {
+  const cls = /看涨/.test(s) ? "b-bull" : /偏空/.test(s) ? "b-bear" : /风险/.test(s) ? "b-warn" : "b-neutral";
+  return `<span class="badge ${cls}">${esc(s)}</span>`;
+}
+function spark(data, w = 90, h = 26) {
+  if (!data || data.length < 2) return "";
+  const min = Math.min(...data), max = Math.max(...data), r = max - min || 1;
+  const pts = data.map((v, i) => `${(i / (data.length - 1) * w).toFixed(1)},${(h - (v - min) / r * (h - 2) - 1).toFixed(1)}`).join(" ");
+  const color = data[data.length - 1] >= data[0] ? "var(--up)" : "var(--down)";
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline fill="none" stroke="${color}" stroke-width="1.5" points="${pts}"/></svg>`;
+}
+function ago(iso) {
+  if (!iso) return "";
+  const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  return m < 1 ? "刚刚" : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`;
+}
+let snap = null;
+
+async function load() {
+  try {
+    const [s, n, st] = await Promise.all([fetch("/api/snapshot").then(r => r.json()), fetch("/api/news?limit=40").then(r => r.json()), fetch("/api/status").then(r => r.json())]);
+    snap = s; render(s); renderNews(n);
+    $("status").textContent = `${st.demo ? "演示模式 · " : ""}每 ${st.refresh_minutes} 分钟更新 · Telegram ${st.telegram ? "✅ " + st.subscribers + " 人" : "未配置"} · AI ${st.claude ? "Claude ✅" : "规则引擎"}`;
+  } catch (e) { $("meta").textContent = "加载失败：" + e; }
+}
+
+function render(s) {
+  $("refreshBtn").disabled = !!s.refreshing;
+  $("refreshBtn").textContent = s.refreshing ? "刷新中…" : "立即刷新";
+  if (!s.generated_at) { $("meta").textContent = "等待首次分析…"; return; }
+  $("meta").textContent = `更新于 ${new Date(s.generated_at).toLocaleString()}（${ago(s.generated_at)}）· 追踪 ${s.tracked} 只 · 本轮新增资讯 ${s.new_articles} 条`;
+  $("engine").textContent = s.insight_engine === "claude" ? "· 由 Claude 生成" : "· 规则引擎";
+  $("overview").className = ""; $("overview").textContent = s.market_overview || "";
+  $("themes").innerHTML = (s.themes || []).map(t => `<span class="chip">${esc(t)}</span>`).join("");
+  $("rank").innerHTML = s.ranking.length ? s.ranking.map((r, i) => {
+    const ins = r.insight || {}; const v = VIEW[ins.view] || VIEW.neutral;
+    return `<tr class="row" data-t="${esc(r.ticker)}"><td>${i + 1}</td><td><b>${esc(r.ticker)}</b></td>
+      <td class="num">${r.score.toFixed(0)}<span class="scorebar"><i style="width:${r.score}%"></i></span></td>
+      <td>${signalBadge(r.signal)}</td><td>${money(r.price)}</td><td>${pct(r.change_1d)}</td><td>${spark(r.spark)}</td>
+      <td class="num">${r.mentions}</td><td>${sent(r.sentiment)}</td>
+      <td class="summary"><span class="badge ${v[1]}">${v[0]}</span> ${esc(ins.summary || "")}</td></tr>`;
+  }).join("") : `<tr><td colspan="10" class="empty">暂无数据</td></tr>`;
+  $("watch").innerHTML = (s.watchlist || []).map(r => `<tr class="row" data-t="${esc(r.ticker)}"><td><b>${esc(r.ticker)}</b></td>
+      <td class="num">${r.score.toFixed(0)}</td><td>${money(r.price)}</td><td>${pct(r.change_1d)}</td><td>${sent(r.sentiment)}</td></tr>`).join("");
+  document.querySelectorAll("tr.row").forEach(tr => tr.onclick = () => openStock(tr.dataset.t));
+}
+
+function renderNews(list) {
+  $("news").innerHTML = list.length ? list.map(a => `<div class="news-item">
+      ${(a.tickers || "").split(",").filter(Boolean).slice(0, 4).map(t => `<span class="tick">$${esc(t)}</span>`).join("")}
+      <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>
+      <div class="news-meta">${esc(a.source)} · ${ago(a.published)} · 情绪 ${sent(a.sentiment)}</div></div>`).join("")
+    : `<div class="empty">暂无资讯</div>`;
+}
+
+function historyChart(h) {
+  if (!h || h.length < 2) return `<div class="news-meta">热度历史数据积累中…</div>`;
+  const w = 480, ht = 120, data = h.map(x => x.score);
+  const pts = data.map((v, i) => `${(i / (data.length - 1) * w).toFixed(1)},${(ht - v / 100 * (ht - 4) - 2).toFixed(1)}`).join(" ");
+  return `<svg viewBox="0 0 ${w} ${ht}" width="100%" height="${ht}" role="img" aria-label="热度历史">
+    <line x1="0" x2="${w}" y1="${ht / 2}" y2="${ht / 2}" stroke="var(--line)" stroke-dasharray="4 4"/>
+    <polyline fill="none" stroke="var(--accent)" stroke-width="2" points="${pts}"/></svg>
+    <div class="news-meta">${new Date(h[0].t).toLocaleString()} → ${new Date(h[h.length - 1].t).toLocaleString()}</div>`;
+}
+
+async function openStock(t) {
+  const d = $("drawer"); d.classList.add("open"); d.innerHTML = `<div class="empty">加载 ${esc(t)}…</div>`;
+  const res = await fetch(`/api/stock/${encodeURIComponent(t)}`); if (!res.ok) { d.innerHTML = `<div class="empty">无数据</div>`; return; }
+  const data = await res.json(); const r = data.current || {}; const ins = r.insight || {}; const v = VIEW[ins.view] || VIEW.neutral;
+  const comps = Object.entries(r.components || {}).map(([k, val]) => {
+    const max = { buzz: 25, velocity: 20, sentiment: 20, volume: 15, momentum: 15, breadth: 5 }[k] || 20;
+    const name = { buzz: "讨论热度", velocity: "热度加速", sentiment: "情绪", volume: "量能", momentum: "价格动能", breadth: "来源广度" }[k] || k;
+    return `<div class="comp"><span>${name}</span><span class="bar"><i style="width:${val / max * 100}%"></i></span><span class="num">${val}</span></div>`;
+  }).join("");
+  d.innerHTML = `<button class="ghost" onclick="$('drawer').classList.remove('open')" style="float:right">关闭 ✕</button>
+    <h3>${esc(t)} ${r.signal ? signalBadge(r.signal) : ""}</h3>
+    <div class="kv">
+      <div><b class="num">${r.score != null ? r.score.toFixed(0) : "—"}</b><span>热度分</span></div>
+      <div><b>${money(r.price)}</b><span>价格</span></div>
+      <div><b>${pct(r.change_1d)}</b><span>日涨跌</span></div>
+      <div><b>${pct(r.change_5d)}</b><span>5 日</span></div>
+      <div><b class="num">${r.volume_ratio ?? "—"}x</b><span>量比(20日)</span></div>
+      <div><b class="num">${r.velocity ?? "—"}x</b><span>热度倍数</span></div>
+    </div>
+    ${ins.summary ? `<div class="card" style="padding:12px;margin-bottom:12px"><span class="badge ${v[1]}">${v[0]} · 信心 ${ins.confidence}</span>
+      <p style="margin:8px 0">${esc(ins.summary)}</p>
+      <div class="news-meta">催化剂：${esc(ins.catalyst)}</div><div class="news-meta">风险：${esc(ins.risks)}</div></div>` : ""}
+    <h2 style="font-size:14px">评分构成</h2>${comps || '<div class="news-meta">—</div>'}
+    <h2 style="font-size:14px;margin-top:14px">热度走势</h2>${historyChart(data.history)}
+    <h2 style="font-size:14px;margin-top:14px">相关资讯（3 天）</h2>
+    ${data.articles.map(a => `<div class="news-item"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>
+      <div class="news-meta">${esc(a.source)} · ${ago(a.published)} · 情绪 ${sent(a.sentiment)}</div></div>`).join("") || '<div class="empty">无</div>'}`;
+}
+
+$("refreshBtn").onclick = async () => {
+  $("refreshBtn").disabled = true; $("refreshBtn").textContent = "刷新中…";
+  await fetch("/api/refresh", { method: "POST" });
+  const poll = setInterval(async () => {
+    const s = await fetch("/api/snapshot").then(r => r.json());
+    if (!s.refreshing) { clearInterval(poll); load(); }
+  }, 3000);
+};
+$("themeBtn").onclick = () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  try { localStorage.setItem("theme", root.dataset.theme); } catch (e) {}
+};
+try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("drawer").classList.remove("open"); });
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>
