@@ -36,6 +36,16 @@ main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 16p
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
 .card h2 { font-size: 15px; margin: 0 0 10px; }
 .overview { grid-column: 1 / -1; }
+.report-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.report-head h2 { margin: 0; }
+.report-head .spacer { flex: 1; }
+.headline { font-size: 17px; margin: 10px 0 6px; }
+.headline:empty { display: none; }
+select, a.btn { font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); text-decoration: none; }
+.extra { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.extra > div { background: var(--bg); border-radius: 8px; padding: 10px 12px; }
+.extra b { display: block; font-size: 12px; color: var(--muted); font-weight: 500; margin-bottom: 4px; }
+@media (max-width: 700px) { .extra { grid-template-columns: minmax(0, 1fr); } }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .chip { background: var(--chip); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; border: 1px solid currentColor; }
@@ -88,9 +98,18 @@ svg.spark { vertical-align: middle; }
 </header>
 <main>
   <section class="card overview">
-    <h2>🧭 市场看法 <span class="meta" id="engine"></span></h2>
+    <div class="report-head">
+      <h2>📊 AI 报告 <span class="meta" id="engine"></span></h2>
+      <span class="spacer"></span>
+      <select id="reportSelect" aria-label="历史报告"></select>
+      <a id="mdLink" class="btn ghost" href="#" target="_blank" rel="noopener" hidden>下载 Markdown</a>
+      <button id="reportBtn">生成 AI 报告</button>
+    </div>
+    <h3 id="headline" class="headline"></h3>
     <div id="overview" class="empty">暂无数据，首次分析进行中…</div>
     <div class="chips" id="themes"></div>
+    <div id="reportExtra"></div>
+    <div id="reportMsg" class="meta"></div>
   </section>
   <section class="card">
     <h2>🔥 热门涨股榜（24 小时）</h2>
@@ -136,12 +155,40 @@ function ago(iso) {
   const m = Math.round((Date.now() - new Date(iso)) / 60000);
   return m < 1 ? "刚刚" : m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`;
 }
-let snap = null;
+let snap = null, report = null, status = null;
+const TOKEN_KEY = "reportToken";
+const getToken = () => { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; } };
+const setToken = (t) => { try { localStorage.setItem(TOKEN_KEY, t); } catch (e) {} };
+
+async function loadReports(selectId) {
+  const list = await fetch("/api/reports").then(r => r.json());
+  const sel = $("reportSelect");
+  sel.innerHTML = list.map(r => `<option value="${r.id}">${new Date(r.created).toLocaleString()} · ${r.engine === "claude" ? "Claude" : "规则"}</option>`).join("");
+  sel.hidden = !list.length;
+  const id = selectId || (list[0] && list[0].id);
+  if (id) { sel.value = id; report = await fetch(`/api/report/${id}`).then(r => r.json()); } else { report = null; }
+  renderReport();
+}
+
+function renderReport() {
+  const src = report || snap || {};
+  const ins = src.insights || {};
+  const isAI = report && report.insight_engine === "claude";
+  $("engine").textContent = report ? `· ${new Date(report.generated_at).toLocaleString()}（${ago(report.generated_at)}）· ${isAI ? "Claude 分析" : "规则引擎"}` : "· 尚未生成，以下为实时规则摘要";
+  $("headline").textContent = report ? (ins.headline || "") : "";
+  $("overview").className = ""; $("overview").textContent = src.market_overview || "暂无数据";
+  $("themes").innerHTML = (src.themes || []).map(t => `<span class="chip">${esc(t)}</span>`).join("");
+  const box = (t, v) => v ? `<div><b>${t}</b>${esc(v)}</div>` : "";
+  $("reportExtra").innerHTML = report ? `<div class="extra">${box("⭐ 重点关注", (ins.top_picks || []).join("、") || "—")}${box("🔭 后市关注", ins.outlook)}${box("⚠️ 风险提示", ins.risk_warning)}</div>` : "";
+  $("mdLink").hidden = !report;
+  if (report) $("mdLink").href = `/api/report/${report.report_id}?format=md`;
+  if (status) $("reportMsg").textContent = `每天 ${status.daily_report_times.join("、")}（${status.timezone}）自动生成并推送 Telegram；只有生成报告时才调用 Claude。`;
+}
 
 async function load() {
   try {
     const [s, n, st] = await Promise.all([fetch("/api/snapshot").then(r => r.json()), fetch("/api/news?limit=40").then(r => r.json()), fetch("/api/status").then(r => r.json())]);
-    snap = s; render(s); renderNews(n);
+    snap = s; status = st; render(s); renderNews(n); renderReport();
     $("status").textContent = `${st.demo ? "演示模式 · " : ""}每 ${st.refresh_minutes} 分钟更新 · Telegram ${st.telegram ? "✅ " + st.subscribers + " 人" : "未配置"} · AI ${st.claude ? "Claude ✅" : "规则引擎"}`;
   } catch (e) { $("meta").textContent = "加载失败：" + e; }
 }
@@ -151,9 +198,6 @@ function render(s) {
   $("refreshBtn").textContent = s.refreshing ? "刷新中…" : "立即刷新";
   if (!s.generated_at) { $("meta").textContent = "等待首次分析…"; return; }
   $("meta").textContent = `更新于 ${new Date(s.generated_at).toLocaleString()}（${ago(s.generated_at)}）· 追踪 ${s.tracked} 只 · 本轮新增资讯 ${s.new_articles} 条`;
-  $("engine").textContent = s.insight_engine === "claude" ? "· 由 Claude 生成" : "· 规则引擎";
-  $("overview").className = ""; $("overview").textContent = s.market_overview || "";
-  $("themes").innerHTML = (s.themes || []).map(t => `<span class="chip">${esc(t)}</span>`).join("");
   $("rank").innerHTML = s.ranking.length ? s.ranking.map((r, i) => {
     const ins = r.insight || {}; const v = VIEW[ins.view] || VIEW.neutral;
     return `<tr class="row" data-t="${esc(r.ticker)}"><td>${i + 1}</td><td><b>${esc(r.ticker)}</b></td>
@@ -188,7 +232,10 @@ function historyChart(h) {
 async function openStock(t) {
   const d = $("drawer"); d.classList.add("open"); d.innerHTML = `<div class="empty">加载 ${esc(t)}…</div>`;
   const res = await fetch(`/api/stock/${encodeURIComponent(t)}`); if (!res.ok) { d.innerHTML = `<div class="empty">无数据</div>`; return; }
-  const data = await res.json(); const r = data.current || {}; const ins = r.insight || {}; const v = VIEW[ins.view] || VIEW.neutral;
+  const data = await res.json(); const r = data.current || {};
+  const fromReport = report && (report.ranking || []).find(x => x.ticker === t);
+  const ins = (fromReport && fromReport.insight) || r.insight || {}; const v = VIEW[ins.view] || VIEW.neutral;
+  const insSrc = fromReport ? `${report.insight_engine === "claude" ? "AI 报告" : "报告"} · ${ago(report.generated_at)}` : "实时规则";
   const comps = Object.entries(r.components || {}).map(([k, val]) => {
     const max = { buzz: 25, velocity: 20, sentiment: 20, volume: 15, momentum: 15, breadth: 5 }[k] || 20;
     const name = { buzz: "讨论热度", velocity: "热度加速", sentiment: "情绪", volume: "量能", momentum: "价格动能", breadth: "来源广度" }[k] || k;
@@ -204,7 +251,7 @@ async function openStock(t) {
       <div><b class="num">${r.volume_ratio ?? "—"}x</b><span>量比(20日)</span></div>
       <div><b class="num">${r.velocity ?? "—"}x</b><span>热度倍数</span></div>
     </div>
-    ${ins.summary ? `<div class="card" style="padding:12px;margin-bottom:12px"><span class="badge ${v[1]}">${v[0]} · 信心 ${ins.confidence}</span>
+    ${ins.summary ? `<div class="card" style="padding:12px;margin-bottom:12px"><span class="badge ${v[1]}">${v[0]} · 信心 ${ins.confidence}</span> <span class="news-meta">${insSrc}</span>
       <p style="margin:8px 0">${esc(ins.summary)}</p>
       <div class="news-meta">催化剂：${esc(ins.catalyst)}</div><div class="news-meta">风险：${esc(ins.risks)}</div></div>` : ""}
     <h2 style="font-size:14px">评分构成</h2>${comps || '<div class="news-meta">—</div>'}
@@ -214,6 +261,24 @@ async function openStock(t) {
       <div class="news-meta">${esc(a.source)} · ${ago(a.published)} · 情绪 ${sent(a.sentiment)}</div></div>`).join("") || '<div class="empty">无</div>'}`;
 }
 
+$("reportSelect").onchange = (e) => loadReports(e.target.value);
+$("reportBtn").onclick = async () => {
+  if (!confirm("生成一份新的 AI 报告（会调用一次 Claude API）？")) return;
+  const btn = $("reportBtn"); btn.disabled = true; btn.textContent = "分析中，约 1 分钟…"; $("reportMsg").textContent = "";
+  try {
+    let token = getToken();
+    let res = await fetch("/api/report", { method: "POST", headers: token ? { Authorization: "Bearer " + token } : {} });
+    if (res.status === 401) {
+      token = prompt("请输入 REPORT_API_TOKEN：") || "";
+      setToken(token);
+      res = await fetch("/api/report", { method: "POST", headers: { Authorization: "Bearer " + token } });
+    }
+    const body = await res.json();
+    if (res.ok) { await loadReports(body.report_id); load(); }
+    else $("reportMsg").textContent = res.status === 429 ? `${body.detail}，约 ${Math.ceil(body.retry_after_s / 60)} 分钟后可再次生成。` : `生成失败：${body.detail || res.status}`;
+  } catch (e) { $("reportMsg").textContent = "生成失败：" + e; }
+  btn.disabled = false; btn.textContent = "生成 AI 报告";
+};
 $("refreshBtn").onclick = async () => {
   $("refreshBtn").disabled = true; $("refreshBtn").textContent = "刷新中…";
   await fetch("/api/refresh", { method: "POST" });
@@ -230,7 +295,7 @@ $("themeBtn").onclick = () => {
 };
 try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
 document.addEventListener("keydown", e => { if (e.key === "Escape") $("drawer").classList.remove("open"); });
-load();
+load().then(() => loadReports());
 setInterval(load, 60000);
 </script>
 </body>

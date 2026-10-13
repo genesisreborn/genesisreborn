@@ -166,8 +166,12 @@ def test_telegram_commands_and_alerts(tmp_path):
     fired = bot.check_alerts(snap)
     assert len(fired) == 2
     assert bot.check_alerts(snap) == []           # de-duplicated for the day
-    assert bot.send_daily_report() == 1
+    assert bot.send_report() == 1
     assert all(m["chat_id"] == "42" and m["parse_mode"] == "HTML" for m in sent)
+
+    assert "还没有" in bot.handle_command("42", "/report")
+    db.save_report(snap)
+    assert "AI 报告" in bot.handle_command("42", "/report")
 
     assert "取消" in bot.handle_command("42", "/stop")
     assert bot.recipients() == []

@@ -72,8 +72,11 @@ def aggregate(db: Database, settings: Settings) -> dict[str, TickerStats]:
     return {t: s for t, s in stats.items() if t in keep}
 
 
-def run_cycle(db: Database, settings: Settings) -> dict:
-    """Execute a full refresh and persist a snapshot. Thread-safe (one cycle at a time)."""
+def run_cycle(db: Database, settings: Settings, use_claude: bool = False) -> dict:
+    """Execute a full refresh and persist a snapshot. Thread-safe (one cycle at a time).
+
+    ``use_claude`` is only set by report generation; the periodic refresh stays free.
+    """
     with _cycle_lock:
         started = utcnow()
         items = gather(settings)
@@ -94,7 +97,7 @@ def run_cycle(db: Database, settings: Settings) -> dict:
             ]
             ranking.append(s.to_dict())
 
-        insights = build_insights(ranking, settings)
+        insights = build_insights(ranking, settings, use_claude=use_claude)
         by_ticker = {x["ticker"]: x for x in insights.get("stocks", [])}
         for r in ranking:
             r["insight"] = by_ticker.get(r["ticker"])
@@ -109,6 +112,7 @@ def run_cycle(db: Database, settings: Settings) -> dict:
             "insight_engine": insights.get("engine"),
             "market_overview": insights.get("market_overview", ""),
             "themes": insights.get("themes", []),
+            "insights": {k: v for k, v in insights.items() if k != "stocks"},
             "ranking": ranking,
             "watchlist": [s.to_dict() for s in scored if s.ticker in settings.watchlist],
         }

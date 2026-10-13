@@ -35,6 +35,13 @@ class Settings:
     alert_top_n: int = field(default_factory=lambda: int(os.getenv("ALERT_TOP_N", "5")))
     alert_min_score: float = field(default_factory=lambda: float(os.getenv("ALERT_MIN_SCORE", "70")))
 
+    # Claude is called only when a report is generated; this blocks repeated
+    # manual triggers inside the window (scheduled reports always run).
+    report_cooldown_minutes: int = field(default_factory=lambda: int(os.getenv("REPORT_COOLDOWN_MINUTES", "30")))
+    # If set, POST /api/report requires "Authorization: Bearer <token>" or ?token=
+    report_api_token: str = field(default_factory=lambda: os.getenv("REPORT_API_TOKEN", ""))
+    reports_dir: str = field(default_factory=lambda: os.getenv("REPORTS_DIR", "data/reports"))
+
     db_path: str = field(default_factory=lambda: os.getenv("DB_PATH", "data/stockpulse.db"))
     watchlist: list[str] = field(default_factory=lambda: [t.upper() for t in _list("WATCHLIST", "AAPL,NVDA,TSLA,MSFT,AMZN")])
     enable_social: bool = field(default_factory=lambda: _bool("ENABLE_SOCIAL", True))

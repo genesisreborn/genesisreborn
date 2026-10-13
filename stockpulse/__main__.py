@@ -1,8 +1,8 @@
 """CLI entry point.
 
     python -m stockpulse serve      # dashboard + scheduler + Telegram bot (default)
-    python -m stockpulse once       # run one analysis cycle and print the top list
-    python -m stockpulse report     # push the latest brief to Telegram now
+    python -m stockpulse once       # one free (rule-based) cycle, print the top list
+    python -m stockpulse report     # fresh data + one Claude call -> report, push to Telegram
 """
 from __future__ import annotations
 
@@ -19,8 +19,9 @@ def main() -> None:
     s = sub.add_parser("serve", help="run dashboard, scheduler and Telegram bot")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8000)
-    sub.add_parser("once", help="run one analysis cycle and print results")
-    sub.add_parser("report", help="send the latest brief to Telegram subscribers")
+    sub.add_parser("once", help="run one rule-based analysis cycle and print results (no Claude)")
+    r = sub.add_parser("report", help="generate an AI report (one Claude call) and send it to Telegram")
+    r.add_argument("--no-send", action="store_true", help="only generate and print, do not push to Telegram")
     p.add_argument("--demo", action="store_true", help="offline demo data (no network)")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
@@ -31,6 +32,7 @@ def main() -> None:
         settings.demo_mode = True
     if settings.demo_mode and not os.getenv("DB_PATH"):
         settings.db_path = "data/demo.db"  # keep sample data out of the real database
+        settings.reports_dir = "data/demo_reports"
 
     cmd = args.cmd or "serve"
     if cmd == "serve":
@@ -48,8 +50,10 @@ def main() -> None:
     elif cmd == "report":
         from .scheduler import Engine
 
-        eng = Engine(settings)
-        print(f"sent to {eng.notifier.send_daily_report()} chat(s)")
+        from .report import render_markdown
+
+        snap = Engine(settings).report(force=True, notify=not args.no_send)
+        print(render_markdown(snap))
 
 
 if __name__ == "__main__":

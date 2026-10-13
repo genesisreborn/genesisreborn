@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 VIEW_ICON = {"bullish": "🟢", "neutral": "🟡", "bearish": "🔴"}
 DISCLAIMER = "<i>⚠️ 以上内容由程序根据公开资讯自动生成，仅供参考，不构成投资建议。</i>"
+REPORT_TITLE = "📊 StockPulse 每日 AI 报告"
 MAX_LEN = 4000  # Telegram hard limit is 4096
 
 
@@ -40,13 +41,22 @@ def format_stock_line(i: int, r: dict) -> str:
 
 
 def format_report(snap: dict, limit: int = 10, title: str = "📈 StockPulse 热门股简报") -> str:
+    ins = snap.get("insights") or {}
     parts = [f"<b>{title}</b>", f"<i>{_e(snap['generated_at'])} UTC</i>", ""]
+    if ins.get("headline"):
+        parts += [f"<b>{_e(ins['headline'])}</b>", ""]
     if snap.get("market_overview"):
         parts += [f"🧭 {_e(snap['market_overview'])}", ""]
     if snap.get("themes"):
         parts += ["🔥 主题：" + " · ".join(_e(t) for t in snap["themes"]), ""]
+    if ins.get("top_picks"):
+        parts += ["⭐ 重点关注：" + "、".join(_e(t) for t in ins["top_picks"]), ""]
     for i, r in enumerate(snap.get("ranking", [])[:limit], 1):
         parts.append(format_stock_line(i, r))
+    if ins.get("outlook"):
+        parts += ["", f"🔭 <b>后市关注</b>：{_e(ins['outlook'])}"]
+    if ins.get("risk_warning"):
+        parts += ["", f"⚠️ <b>风险提示</b>：{_e(ins['risk_warning'])}"]
     parts += ["", DISCLAIMER]
     return "\n".join(parts)
 
@@ -101,11 +111,13 @@ class TelegramNotifier:
     def broadcast(self, text: str) -> int:
         return sum(self.send(c, text) for c in self.recipients())
 
-    def send_daily_report(self) -> int:
-        snap = self.db.latest_snapshot()
+    def send_report(self, snap: dict | None = None) -> int:
+        """Broadcast a report (defaults to the latest stored one; never calls Claude)."""
+        snap = snap or self.db.get_report() or self.db.latest_snapshot()
         if not snap:
             return 0
-        return self.broadcast(format_report(snap))
+        return self.broadcast(format_report(snap, title=REPORT_TITLE if snap.get("report_id") else
+                                            "📈 StockPulse 热门股简报"))
 
     def check_alerts(self, snap: dict) -> list[str]:
         """Alert on tickers newly entering the top N above the score threshold (once per day)."""
@@ -127,10 +139,13 @@ class TelegramNotifier:
         if cmd in ("/start", "/subscribe"):
             self.db.add_subscriber(chat_id)
             return ("✅ 已订阅 StockPulse！你会收到每日热门股简报和盘中异动提醒。\n\n"
-                    "/top 查看当前热门榜\n/stock TSLA 查看个股\n/stop 取消订阅")
+                    "/report 最新 AI 报告\n/top 实时热门榜\n/stock TSLA 查看个股\n/stop 取消订阅")
         if cmd in ("/stop", "/unsubscribe"):
             self.db.remove_subscriber(chat_id)
             return "已取消订阅。发送 /start 可重新订阅。"
+        if cmd == "/report":
+            rep = self.db.get_report()
+            return format_report(rep, title=REPORT_TITLE) if rep else "还没有生成过 AI 报告，到点会自动推送。"
         if cmd == "/top":
             return format_report(snap) if snap else "数据还在生成中，请稍后再试。"
         if cmd == "/stock":
@@ -141,7 +156,7 @@ class TelegramNotifier:
                 if r["ticker"] == t:
                     return format_stock_detail(r)
             return f"{_e(t)} 目前不在热门榜/关注列表中。"
-        return "可用命令：/start /top /stock TICKER /stop"
+        return "可用命令：/start /report /top /stock TICKER /stop"
 
     def poll_forever(self) -> None:
         if not self.settings.telegram_enabled:

@@ -1,0 +1,15 @@
+[Unit]
+Description=StockPulse hot-stock radar (dashboard + scheduler + Telegram bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=__DIR__/.venv/bin/python -m stockpulse serve --port __PORT__
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

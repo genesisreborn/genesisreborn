@@ -1,25 +1,26 @@
 # 📈 StockPulse 热门股雷达
 
 从全网公开资讯（财经新闻 RSS、Reddit、StockTwits）抓取讨论，结合 Yahoo Finance 行情，
-实时推测**热门上涨股**，在网页 Dashboard 展示，并通过 **Telegram** 每日推送简报和盘中异动提醒。
-配置 Claude API Key 后，由 Claude 生成中文市场看法；未配置时使用内置规则引擎。
+实时推测**热门上涨股**，在网页 Dashboard 展示，并通过 **Telegram** 推送每日 AI 报告和盘中异动提醒。
+
+**Claude 只在生成报告时调用一次。** 新闻抓取、行情和热度评分每 15 分钟自动刷新，这部分完全免费，不调用 Claude。
+到了每天的报告时间（或你手动调 API），系统才把当时的热门股数据交给 Claude 分析一次，生成完整报告并推送。
 
 > ⚠️ 本项目仅用于信息聚合与研究，输出内容不构成任何投资建议。
 
 ## 工作原理
 
 ```
- 资讯源 ──► 识别股票代码 ──► 情绪分析 ──► SQLite
- (RSS/Reddit/StockTwits)                   │
-                                           ▼
- Yahoo 行情 ─► 价格/量能特征 ──► 热度评分(0-100) ──► Claude / 规则引擎看法
-                                           │
-                     ┌─────────────────────┼─────────────────────┐
-                     ▼                     ▼                     ▼
-               Web Dashboard        Telegram 每日简报      Telegram 异动提醒
+每 15 分钟（免费）：
+ 资讯源 ──► 识别股票代码 ──► 情绪分析 ──► 行情特征 ──► 热度评分 ──► 规则引擎摘要
+                                                                     │
+                                                    Web Dashboard 实时榜 + Telegram 异动提醒
+
+每天报告时间 / POST /api/report（调用 Claude 一次）：
+ 最新数据 ──► Claude 分析 ──► 报告（存数据库 + Markdown 文件）──► Telegram 推送 + Dashboard 展示
 ```
 
-每 `REFRESH_MINUTES`（默认 15 分钟）运行一轮：
+每轮刷新的步骤：
 
 1. **采集**：Yahoo Finance / CNBC / MarketWatch / Nasdaq / Seeking Alpha / Investing.com / Benzinga /
    Google News 的 RSS，关注列表个股的 Yahoo 新闻源，Reddit（wallstreetbets、stocks 等）热帖，StockTwits 热门榜。
@@ -38,10 +39,23 @@
    | 来源广度 | 5 | 有多少个不同来源在讨论 |
 
    信号分档：强势看涨 / 看涨 / 关注 / 中性 / 热度高·偏空 / 追高风险。
-5. **看法**：前 15 名连同最新标题一起交给 Claude（`claude-opus-5-5`，结构化 JSON 输出），
-   得到市场概览、热点主题和每只股票的观点、信心、催化剂、风险。
+5. **实时摘要**：规则引擎根据上面的数据写一句话看法（不花钱）。
 
-## 快速开始
+生成报告时，前 15 名连同最新标题一起交给 Claude（`claude-opus-5-5`，结构化 JSON 输出），得到：
+标题、市场概览、热点主题、重点关注股票、每只股票的观点/信心/催化剂/风险、后市关注、风险提示。
+
+## 一键安装（推荐）
+
+```bash
+git clone <你的仓库地址> stockpulse && cd stockpulse
+bash setup.sh
+```
+
+脚本会：创建虚拟环境并安装依赖 → 引导你填 Telegram token、Claude API Key、时区、报告时间、关注列表 →
+生成 `REPORT_API_TOKEN` → 跑一遍自检 → 验证 Telegram token → （Linux 服务器上）安装为开机自启的 systemd 服务。
+装好后在 Telegram 里给你的机器人发 `/start` 就能收到报告。
+
+## 手动安装
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -59,10 +73,13 @@ python -m stockpulse serve
 其他命令：
 
 ```bash
-python -m stockpulse once      # 跑一轮分析，在终端打印热门榜
-python -m stockpulse report    # 立即向 Telegram 订阅者推送最新简报
+python -m stockpulse once              # 跑一轮免费分析（不调用 Claude），打印热门榜
+python -m stockpulse report            # 抓最新数据 + 调用 Claude 一次 → 生成报告并推送 Telegram
+python -m stockpulse report --no-send  # 只生成并打印报告，不推送
 python -m pytest               # 运行测试
 ```
+
+不想常驻服务也可以：用 crontab 定时执行 `python -m stockpulse report`，每次运行就是“抓数据 → Claude 分析一次 → 推送报告”。
 
 Docker：
 
@@ -75,31 +92,48 @@ cp .env.example .env && docker compose up -d --build
 1. 在 Telegram 里找 **@BotFather**，发送 `/newbot` 创建机器人，把 token 填到 `.env` 的 `TELEGRAM_BOT_TOKEN`。
 2. 启动服务后，在 Telegram 里给你的机器人发送 `/start` 即完成订阅（也可以把 chat id 写进 `TELEGRAM_CHAT_IDS`）。
 3. 机器人命令：
-   - `/top` 当前热门榜
+   - `/report` 最新一份 AI 报告（读取已生成的报告，不会触发新的 Claude 调用）
+   - `/top` 实时热门榜
    - `/stock NVDA` 个股详情（评分、看法、最新资讯）
    - `/stop` 取消订阅
 
 推送规则：
-- **每日简报**：`DAILY_REPORT_TIMES`（按 `TIMEZONE`，默认北京时间 08:30 和 21:00，分别在美股收盘后和开盘前）。
+- **每日 AI 报告**：`DAILY_REPORT_TIMES`（按 `TIMEZONE`，默认北京时间 08:30 和 21:00，分别在美股收盘后和开盘前），每个时间点调用 Claude 一次。
 - **异动提醒**：某只股票进入前 `ALERT_TOP_N` 名且热度 ≥ `ALERT_MIN_SCORE` 时立即推送，同一只股票每天只提醒一次。
 
 ## 配置 Claude（可选）
 
 在 `.env` 填写 `ANTHROPIC_API_KEY`。默认模型 `claude-opus-5-5`，可通过 `CLAUDE_MODEL` 修改。
-请求启用了服务端 refusal fallback（`fallbacks: "default"`）；调用失败或被拒绝时自动回退到规则引擎，不影响其他功能。
-每轮刷新调用一次，15 分钟一轮的话每天约 96 次；想省成本可以调大 `REFRESH_MINUTES`。
+
+- **调用次数**：只在生成报告时调用。默认每天 2 个报告时间点，就是每天 2 次；手动生成另算。
+- **防止重复调用**：手动生成（API 或 Dashboard 按钮）有 `REPORT_COOLDOWN_MINUTES`（默认 30 分钟）冷却，
+  冷却期内再请求会返回 429 和上一份报告的编号。定时报告不受冷却限制。
+- **接口保护**：设置 `REPORT_API_TOKEN` 后，`POST /api/report` 必须带 `Authorization: Bearer <token>`。服务放在公网时一定要设置。
+- 请求启用了服务端 refusal fallback（`fallbacks: "default"`）；调用失败或被拒绝时自动改用规则引擎出报告。
 
 ## Dashboard / API
 
 | 路径 | 说明 |
 |---|---|
-| `/` | Dashboard：市场看法、热门榜（含走势迷你图）、关注列表、最新资讯；点击股票查看评分构成和热度走势。每 60 秒自动更新 |
+| `/` | Dashboard：AI 报告（可切换历史报告、下载 Markdown、手动生成）、实时热门榜、关注列表、最新资讯；点击股票查看评分构成和热度走势。每 60 秒自动更新 |
+| `POST /api/report` | 抓最新数据并调用 Claude 一次，返回报告。参数：`notify=true` 同时推送 Telegram；`force=true` 跳过冷却 |
+| `GET /api/report/latest` | 最新一份报告 |
+| `GET /api/report/{id}` | 指定报告；加 `?format=md` 返回 Markdown |
+| `GET /api/reports` | 历史报告列表 |
 | `GET /api/snapshot` | 最新一轮分析结果 |
 | `GET /api/stock/{ticker}` | 个股详情、热度历史、近 3 天资讯 |
 | `GET /api/news` | 最新资讯 |
 | `GET /api/status` | 运行状态与下次任务时间 |
 | `POST /api/refresh` | 立即触发一轮分析 |
-| `POST /api/telegram/test` | 立即推送一次简报 |
+| `POST /api/telegram/test` | 把最新一份报告推送到 Telegram（不调用 Claude） |
+
+调用示例：
+
+```bash
+curl -X POST "http://localhost:8000/api/report?notify=true" -H "Authorization: Bearer $REPORT_API_TOKEN"
+```
+
+报告同时保存为 Markdown 文件，在 `data/reports/` 目录。
 
 ## 项目结构
 
@@ -113,10 +147,13 @@ stockpulse/
   scoring.py        热度评分与信号
   insights.py       Claude / 规则引擎生成看法
   pipeline.py       一轮完整的分析流程
+  report.py         报告生成（调用 Claude 一次）、冷却、Markdown 输出
   telegram_bot.py   推送与机器人命令
   scheduler.py      定时任务
   web/              FastAPI + Dashboard
 tests/              单元测试与端到端测试
+setup.sh            一键安装脚本
+deploy/             systemd 服务模板
 ```
 
 ## 扩展

@@ -6,11 +6,12 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 from ..config import Settings, settings as default_settings
 from ..db import utcnow
+from ..report import ReportCooldown, render_markdown
 from ..scheduler import Engine
 
 STATIC = Path(__file__).parent / "static"
@@ -63,6 +64,8 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
             "telegram": settings.telegram_enabled, "claude": settings.claude_enabled, "demo": settings.demo_mode,
             "subscribers": len(engine.notifier.recipients()), "refresh_minutes": settings.refresh_minutes,
             "daily_report_times": settings.daily_report_times, "timezone": settings.timezone, "jobs": jobs,
+            "report_token_required": bool(settings.report_api_token),
+            "last_report": (engine.db.list_reports(1) or [None])[0],
         }
 
     @app.post("/api/refresh")
@@ -82,10 +85,50 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
         threading.Thread(target=run, daemon=True).start()
         return {"started": True}
 
+    def check_token(authorization: str | None, token: str | None) -> None:
+        expected = settings.report_api_token
+        if not expected:
+            return
+        given = token or (authorization or "").removeprefix("Bearer ").strip()
+        if given != expected:
+            raise HTTPException(401, "invalid or missing report API token")
+
+    @app.post("/api/report")
+    def create_report(notify: bool = False, force: bool = False,
+                      authorization: str | None = Header(None), token: str | None = Query(None)):
+        """Fresh data + one Claude call -> stored report. Blocks until done (~10-60s)."""
+        check_token(authorization, token)
+        try:
+            return engine.report(force=force, notify=notify)
+        except ReportCooldown as exc:
+            return JSONResponse(status_code=429, content={
+                "detail": f"上一份报告生成于 {exc.latest['generated_at']}，冷却中",
+                "retry_after_s": exc.retry_after_s, "latest_report_id": exc.latest["report_id"]})
+
+    @app.get("/api/reports")
+    def reports(limit: int = 30):
+        return engine.db.list_reports(min(limit, 200))
+
+    @app.get("/api/report/latest")
+    def latest_report():
+        rep = engine.db.get_report()
+        if not rep:
+            raise HTTPException(404, "no report yet")
+        return rep
+
+    @app.get("/api/report/{report_id}")
+    def get_report(report_id: int, format: str = "json"):
+        rep = engine.db.get_report(report_id)
+        if not rep:
+            raise HTTPException(404, "report not found")
+        if format == "md":
+            return PlainTextResponse(render_markdown(rep), media_type="text/markdown; charset=utf-8")
+        return rep
+
     @app.post("/api/telegram/test")
     def telegram_test():
         if not settings.telegram_enabled:
             raise HTTPException(400, "TELEGRAM_BOT_TOKEN not configured")
-        return {"sent": engine.notifier.send_daily_report()}
+        return {"sent": engine.notifier.send_report()}
 
     return app

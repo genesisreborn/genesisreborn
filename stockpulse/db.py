@@ -37,6 +37,13 @@ CREATE TABLE IF NOT EXISTS snapshots (
     payload     TEXT NOT NULL              -- JSON: ranking + insights
 );
 
+CREATE TABLE IF NOT EXISTS reports (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    created     TEXT NOT NULL,
+    engine      TEXT NOT NULL,             -- claude | rules
+    payload     TEXT NOT NULL              -- JSON snapshot incl. insights
+);
+
 CREATE TABLE IF NOT EXISTS subscribers (
     chat_id     TEXT PRIMARY KEY,
     created     TEXT NOT NULL
@@ -179,6 +186,27 @@ class Database:
                     out.append({"t": r["created"], "score": item["score"], "price": item.get("price")})
                     break
         return out
+
+    # ---- reports ----
+    def save_report(self, snap: dict) -> int:
+        with self.tx() as c:
+            cur = c.execute("INSERT INTO reports(created, engine, payload) VALUES (?, ?, ?)",
+                            (snap["generated_at"], snap.get("insight_engine") or "rules",
+                             json.dumps(snap, ensure_ascii=False)))
+            return int(cur.lastrowid)
+
+    def get_report(self, report_id: int | None = None) -> dict | None:
+        if report_id is None:
+            rows = self.query("SELECT id, payload FROM reports ORDER BY id DESC LIMIT 1")
+        else:
+            rows = self.query("SELECT id, payload FROM reports WHERE id = ?", (report_id,))
+        if not rows:
+            return None
+        return {**json.loads(rows[0]["payload"]), "report_id": rows[0]["id"]}
+
+    def list_reports(self, limit: int = 30) -> list[dict]:
+        rows = self.query("SELECT id, created, engine FROM reports ORDER BY id DESC LIMIT ?", (limit,))
+        return [dict(r) for r in rows]
 
     # ---- telegram ----
     def add_subscriber(self, chat_id: str) -> None:
