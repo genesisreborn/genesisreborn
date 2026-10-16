@@ -1,4 +1,4 @@
-# 📈 StockPulse 热门股雷达
+# 📈 StockPulse 热门股雷达 + 图表策略平台
 
 从全网公开资讯（财经新闻 RSS、Reddit、StockTwits）抓取讨论，结合 Yahoo Finance 行情，
 实时推测**热门上涨股**，在网页 Dashboard 展示，并通过 **Telegram** 推送每日 AI 报告和盘中异动提醒。
@@ -8,7 +8,55 @@
 
 > ⚠️ 本项目仅用于信息聚合与研究，输出内容不构成任何投资建议。
 
-## 工作原理
+系统有两个页面：
+
+- **热门雷达**（`/`）：从新闻和社交媒体找出热门股，每天生成 AI 报告。
+- **图表 · 策略**（`/chart`）：类似 TradingView 的 K 线图表，支持技术指标、自定义策略、回测，并按你的策略自动给出买卖信号推送到 Telegram。
+
+## 图表 · 策略平台
+
+打开 `http://localhost:8000/chart`。
+
+**图表**
+- K 线 + 成交量，周期 1 分 / 5 分 / 15 分 / 1 小时 / 日 / 周。图表库是 TradingView 开源的 [Lightweight Charts](https://github.com/tradingview/lightweight-charts)（已打包进项目，不依赖外网 CDN）。
+- 指标：EMA、SMA、布林带、VWAP、SuperTrend、唐奇安通道（叠加在主图），RSI、MACD、随机指标 KD、ATR（独立副图）。参数可调。
+- 十字光标显示 OHLC 和所有指标值；数据每 30 秒自动刷新，K 线未收盘时会标“K 线进行中”。
+- 自选列表：美股、港股（`0700.HK`）、A 股（`600519.SS`）、加密货币（`BTC-USD`，仅 Yahoo 数据源）。
+
+**行情数据**
+- 默认 Yahoo Finance（免费，可能有延迟；1 分钟线只有最近 7 天，5/15 分钟线最近 60 天，1 小时线最近 2 年）。
+- 填 `MASSIVE_API_KEY`（Massive，原 Polygon.io）后改用 Massive 行情，实时性取决于你的订阅档位。
+- K 线缓存在 SQLite，之后只增量拉取。
+
+**策略**
+
+规则写法类似 Pine Script，每条规则是一个真/假表达式：
+
+```
+做多开仓：crossover(ema(close, fast), ema(close, slow)) and rsi(close, 14) < 70
+做多平仓：crossunder(ema(close, fast), ema(close, slow))
+参数：    fast=12, slow=26
+```
+
+- 行情变量：`open high low close volume hl2 hlc3 ohlc4`；`close[1]` 是前一根 K 线的值。
+- 函数：`sma ema wma rsi macd macd_signal macd_hist bb_upper bb_mid bb_lower stoch_k stoch_d atr vwap supertrend supertrend_dir obv highest lowest crossover crossunder prev change rising falling abs max min`。
+- 运算：`and or not`、比较、加减乘除。表达式在服务器上用白名单解析，不能执行任意代码。
+- 风控：止损 %、止盈 %、ATR 倍数止损；可选做空规则（多空反手）。
+- 内置 7 个模板可直接改：均线金叉、RSI 超卖反弹、MACD 趋势、唐奇安突破（海龟）、布林带放量突破、SuperTrend 多空、强势股回踩。
+
+**回测**
+- 在当前图表的代码和周期上回测，结果显示在图表下方：总收益、买入持有对比、年化、最大回撤、夏普、索提诺、胜率、盈亏比、交易明细、净值曲线；买卖点标在 K 线上。
+- 撮合规则（避免“偷看未来”）：每根 K 线**收盘**计算信号，**下一根 K 线开盘**成交；止损/止盈按当根最高最低价判断，跳空穿过止损价则按开盘价成交；默认每边手续费 5bp + 滑点 5bp（`COMMISSION_BPS` / `SLIPPAGE_BPS`）。
+
+**实时信号**
+- 保存策略时填上要监控的代码，勾选“启用实时信号”。
+- 系统每 `SIGNAL_REFRESH_MINUTES`（默认 5 分钟）拉取新 K 线，用同一套回测逻辑跑一遍：最新一根**已收盘** K 线产生的买卖指令就是信号，同时检查止损/止盈是否被触发。
+- 新信号写入数据库（同一根 K 线不会重复）、显示在「信号」页、推送到 Telegram（含收盘价、参考止损/止盈）。Telegram 里发 `/signals` 查看最近信号。
+- 「信号」页还列出每个策略 × 代码当前的模拟持仓、开仓价、浮盈和止损位。
+
+> 系统只给信号，不会自动下单。
+
+## 工作原理（热门雷达）
 
 ```
 每 15 分钟（免费）：
@@ -126,6 +174,16 @@ cp .env.example .env && docker compose up -d --build
 | `GET /api/status` | 运行状态与下次任务时间 |
 | `POST /api/refresh` | 立即触发一轮分析 |
 | `POST /api/telegram/test` | 把最新一份报告推送到 Telegram（不调用 Claude） |
+| `/chart` | 图表 · 策略页面 |
+| `GET /api/chart?symbol=AAPL&interval=1d&indicators=ema:20,rsi:14,macd` | K 线 + 指标数据 |
+| `GET /api/strategy/meta` | 内置模板、可用函数、周期 |
+| `GET/POST /api/strategies`、`DELETE /api/strategies/{id}` | 策略列表 / 保存 / 删除 |
+| `POST /api/strategies/validate` | 检查策略规则是否有效 |
+| `POST /api/backtest` | 回测：`{"strategy": {...} 或 "strategy_id": 1, "symbol": "AAPL", "interval": "1d"}` |
+| `GET /api/signals`、`GET /api/positions`、`POST /api/signals/run` | 信号列表 / 模拟持仓 / 立即检查 |
+| `GET/PUT /api/watchlist` | 自选列表 |
+
+设置 `API_TOKEN` 后，所有写操作（生成报告、保存/删除策略、修改自选、立即检查）都要带 `Authorization: Bearer <token>`；网页第一次遇到时会提示输入并记住。
 
 调用示例：
 
@@ -148,9 +206,12 @@ stockpulse/
   insights.py       Claude / 规则引擎生成看法
   pipeline.py       一轮完整的分析流程
   report.py         报告生成（调用 Claude 一次）、冷却、Markdown 输出
+  market_data.py    K 线数据（Yahoo / Massive）、缓存、判断 K 线是否收盘
+  indicators.py     技术指标
+  strategy/         策略：dsl.py 规则语言、presets.py 模板、backtest.py 回测、signals.py 实时信号
   telegram_bot.py   推送与机器人命令
   scheduler.py      定时任务
-  web/              FastAPI + Dashboard
+  web/              FastAPI；static/index.html 热门雷达，static/chart.html 图表策略页，trading.py 图表/策略 API
 tests/              单元测试与端到端测试
 setup.sh            一键安装脚本
 deploy/             systemd 服务模板
@@ -165,6 +226,9 @@ deploy/             systemd 服务模板
 
 ## 局限
 
+- 回测结果不代表未来收益。参数在一段历史上调得越“好”，实盘越可能失效；建议在多个代码、多段时间上验证。
+- 实时信号以 K 线收盘为准：日线信号在美东 16:15 之后产生，止损在盘中被触发时，要等那根 K 线收盘才推送。
+- Yahoo 数据有延迟且偶尔缺失；需要更及时的数据请用 Massive。
 - 热度 ≠ 涨幅。社交媒体热度很容易被炒作带动，评分只代表“正在被关注且舆论偏正面”，不预测价格。
 - 免费数据源有频率限制，偶尔会失败；单个源失败不影响整轮分析。
 - Yahoo 行情有延迟，不适合日内交易。

@@ -6,13 +6,15 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
 from ..config import Settings, settings as default_settings
 from ..db import utcnow
 from ..report import ReportCooldown, render_markdown
 from ..scheduler import Engine
+from .trading import build_router
 
 STATIC = Path(__file__).parent / "static"
 
@@ -35,6 +37,17 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
     @app.get("/")
     def index():
         return FileResponse(STATIC / "index.html")
+
+    @app.get("/chart")
+    def chart_page():
+        return FileResponse(STATIC / "chart.html")
+
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+    def token_dep(authorization: str | None = Header(None), token: str | None = Query(None)) -> None:
+        check_token(authorization, token)
+
+    app.include_router(build_router(engine, Depends(token_dep)))
 
     @app.get("/api/snapshot")
     def snapshot():
@@ -66,6 +79,9 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
             "daily_report_times": settings.daily_report_times, "timezone": settings.timezone, "jobs": jobs,
             "report_token_required": bool(settings.report_api_token),
             "last_report": (engine.db.list_reports(1) or [None])[0],
+            "market_data": engine.signals.store.provider,
+            "signal_refresh_minutes": settings.signal_refresh_minutes,
+            "active_strategies": len(engine.db.list_strategies(enabled_only=True)),
         }
 
     @app.post("/api/refresh")

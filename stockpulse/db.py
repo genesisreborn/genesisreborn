@@ -44,6 +44,37 @@ CREATE TABLE IF NOT EXISTS reports (
     payload     TEXT NOT NULL              -- JSON snapshot incl. insights
 );
 
+CREATE TABLE IF NOT EXISTS bars (
+    symbol      TEXT NOT NULL,
+    interval    TEXT NOT NULL,
+    ts          INTEGER NOT NULL,          -- bar open time, unix seconds UTC
+    open REAL, high REAL, low REAL, close REAL, volume REAL,
+    PRIMARY KEY (symbol, interval, ts)
+);
+
+CREATE TABLE IF NOT EXISTS strategies (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    config      TEXT NOT NULL,             -- JSON StrategyConfig
+    enabled     INTEGER NOT NULL DEFAULT 0,
+    updated     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS signals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy_id INTEGER NOT NULL,
+    strategy    TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    interval    TEXT NOT NULL,
+    bar_ts      INTEGER NOT NULL,          -- the closed bar that produced the signal
+    action      TEXT NOT NULL,             -- BUY | SELL | SHORT | COVER
+    reason      TEXT NOT NULL,
+    price       REAL NOT NULL,
+    created     TEXT NOT NULL,
+    UNIQUE (strategy_id, symbol, interval, bar_ts, action)
+);
+CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created);
+
 CREATE TABLE IF NOT EXISTS subscribers (
     chat_id     TEXT PRIMARY KEY,
     created     TEXT NOT NULL
@@ -165,6 +196,9 @@ class Database:
             c.execute("DELETE FROM mentions WHERE published < ?", (cutoff,))
             c.execute("DELETE FROM articles WHERE published < ?", (cutoff,))
             c.execute("DELETE FROM snapshots WHERE created < ?", (cutoff,))
+            # intraday bars are bulky; daily/weekly history is kept
+            c.execute("DELETE FROM bars WHERE interval IN ('1m','5m','15m','30m') AND ts < ?",
+                      (int((utcnow() - timedelta(days=90)).timestamp()),))
 
     # ---- snapshots ----
     def save_snapshot(self, payload: dict) -> int:
@@ -207,6 +241,60 @@ class Database:
     def list_reports(self, limit: int = 30) -> list[dict]:
         rows = self.query("SELECT id, created, engine FROM reports ORDER BY id DESC LIMIT ?", (limit,))
         return [dict(r) for r in rows]
+
+    # ---- strategies ----
+    def save_strategy(self, cfg: dict) -> int:
+        data = json.dumps(cfg, ensure_ascii=False)
+        with self.tx() as c:
+            if cfg.get("id"):
+                cur = c.execute("UPDATE strategies SET name=?, config=?, enabled=?, updated=? WHERE id=?",
+                                (cfg["name"], data, int(bool(cfg.get("enabled"))), iso(utcnow()), cfg["id"]))
+                if cur.rowcount:
+                    return int(cfg["id"])
+            cur = c.execute("INSERT INTO strategies(name, config, enabled, updated) VALUES (?,?,?,?)",
+                            (cfg["name"], data, int(bool(cfg.get("enabled"))), iso(utcnow())))
+            new_id = int(cur.lastrowid)
+            cfg = {**cfg, "id": new_id}
+            c.execute("UPDATE strategies SET config=? WHERE id=?", (json.dumps(cfg, ensure_ascii=False), new_id))
+            return new_id
+
+    def get_strategy(self, sid: int) -> dict | None:
+        rows = self.query("SELECT config FROM strategies WHERE id=?", (sid,))
+        return json.loads(rows[0]["config"]) if rows else None
+
+    def list_strategies(self, enabled_only: bool = False) -> list[dict]:
+        sql = "SELECT config FROM strategies" + (" WHERE enabled=1" if enabled_only else "") + " ORDER BY id"
+        return [json.loads(r["config"]) for r in self.query(sql)]
+
+    def delete_strategy(self, sid: int) -> bool:
+        with self.tx() as c:
+            return c.execute("DELETE FROM strategies WHERE id=?", (sid,)).rowcount > 0
+
+    # ---- signals ----
+    def add_signal(self, sig: dict) -> int | None:
+        """Insert a signal; returns its id, or None if this exact signal was already recorded."""
+        with self.tx() as c:
+            cur = c.execute(
+                "INSERT OR IGNORE INTO signals(strategy_id, strategy, symbol, interval, bar_ts, action, reason, price, created)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                (sig["strategy_id"], sig["strategy"], sig["symbol"], sig["interval"], sig["bar_ts"], sig["action"],
+                 sig["reason"], sig["price"], iso(utcnow())))
+            return int(cur.lastrowid) if cur.rowcount else None
+
+    def list_signals(self, limit: int = 100, symbol: str | None = None) -> list[dict]:
+        if symbol:
+            rows = self.query("SELECT * FROM signals WHERE symbol=? ORDER BY bar_ts DESC, id DESC LIMIT ?", (symbol, limit))
+        else:
+            rows = self.query("SELECT * FROM signals ORDER BY created DESC, id DESC LIMIT ?", (limit,))
+        return [dict(r) for r in rows]
+
+    # ---- watchlist (chart page) ----
+    def get_watchlist(self, default: list[str]) -> list[str]:
+        raw = self.get_kv("chart_watchlist")
+        return json.loads(raw) if raw else list(default)
+
+    def set_watchlist(self, symbols: list[str]) -> None:
+        self.set_kv("chart_watchlist", json.dumps(symbols))
 
     # ---- telegram ----
     def add_subscriber(self, chat_id: str) -> None:

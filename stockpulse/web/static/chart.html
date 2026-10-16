@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StockPulse 图表与策略</title>
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f5f7; --panel: #ffffff; --panel-2: #f7f8fa; --text: #131722; --muted: #5d6270; --line: #e0e3eb;
+  --accent: #2a78d6; --up: #089981; --down: #f23645; --warn: #b7791f;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+  --chart-bg: #ffffff; --grid: #f0f2f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #0f1117; --panel: #161a23; --panel-2: #1c212c; --text: #e6e8ee; --muted: #9aa0ad; --line: #2a2f3b;
+    --accent: #3987e5; --up: #22ab94; --down: #f7525f; --warn: #d29922;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #2f9e44; --s7: #9085e9; --s8: #e66767;
+    --chart-bg: #131722; --grid: #1e2330;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1117; --panel: #161a23; --panel-2: #1c212c; --text: #e6e8ee; --muted: #9aa0ad; --line: #2a2f3b;
+  --accent: #3987e5; --up: #22ab94; --down: #f7525f; --warn: #d29922;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #2f9e44; --s7: #9085e9; --s8: #e66767;
+  --chart-bg: #131722; --grid: #1e2330;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { color: var(--down); }
+button:disabled { opacity: .5; cursor: default; }
+input, select, textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+textarea { width: 100%; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+a { color: var(--accent); }
+
+.app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+.topbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.brand { font-weight: 700; margin-right: 6px; white-space: nowrap; }
+.nav a { color: var(--muted); text-decoration: none; padding: 4px 8px; border-radius: 6px; }
+.nav a.on { color: var(--text); background: var(--panel-2); }
+#symbolInput { width: 110px; text-transform: uppercase; font-weight: 600; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; padding: 5px 9px; }
+.seg button.on { background: var(--accent); color: #fff; }
+.quote { display: flex; align-items: baseline; gap: 8px; margin-left: 6px; }
+.quote .px { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.up { color: var(--up); } .down { color: var(--down); }
+.spacer { flex: 1; }
+.muted { color: var(--muted); }
+.badge { display: inline-block; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--line); font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; min-height: 0; }
+.left { display: grid; grid-template-rows: minmax(320px, 1fr) auto; min-height: 0; min-width: 0; }
+.chart-wrap { position: relative; min-height: 0; background: var(--chart-bg); }
+#chart { position: absolute; inset: 0; }
+.legend { position: absolute; left: 10px; top: 8px; z-index: 3; pointer-events: none; font-size: 12px; line-height: 1.6;
+  background: color-mix(in srgb, var(--chart-bg) 80%, transparent); padding: 2px 6px; border-radius: 4px; max-width: calc(100% - 90px); }
+.legend .title { font-weight: 700; font-size: 13px; }
+.legend .item { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; white-space: nowrap; color: var(--muted); }
+.legend .sw { width: 10px; height: 2px; border-radius: 1px; display: inline-block; }
+.legend b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+.chart-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); z-index: 2; pointer-events: none; }
+
+.dropdown { position: relative; }
+.menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px; min-width: 240px; box-shadow: 0 8px 24px rgba(0,0,0,.18); display: none; }
+.menu.open { display: block; }
+.menu label { display: flex; align-items: center; gap: 8px; padding: 4px 4px; border-radius: 4px; cursor: pointer; }
+.menu label:hover { background: var(--panel-2); }
+.menu input[type=text] { width: 64px; padding: 2px 6px; margin-left: auto; }
+
+.bottom { background: var(--panel); border-top: 1px solid var(--line); max-height: 46vh; overflow: auto; display: none; }
+.bottom.open { display: block; }
+.bottom-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; padding: 10px 12px; }
+.metric { background: var(--panel-2); border-radius: 8px; padding: 8px 10px; }
+.metric b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
+.metric > span { color: var(--muted); font-size: 11px; }
+.bt-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; padding: 0 12px 12px; }
+#equity { height: 200px; position: relative; }
+.eq-legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); padding: 0 0 4px; }
+.eq-legend i { display: inline-block; width: 12px; height: 2px; vertical-align: middle; margin-right: 4px; }
+
+.side { background: var(--panel); border-left: 1px solid var(--line); display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tabs button { flex: 1; border: 0; border-radius: 0; background: transparent; padding: 10px 0; color: var(--muted); border-bottom: 2px solid transparent; }
+.tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.tab { overflow: auto; padding: 10px 12px; display: none; min-height: 0; }
+.tab.on { display: block; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 11px; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.click { cursor: pointer; } tr.click:hover { background: var(--panel-2); }
+tr.active td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+.row > * { flex: 1; }
+.field { margin: 8px 0; }
+.field label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.errors { color: var(--down); font-size: 12px; white-space: pre-wrap; }
+.ok { color: var(--up); font-size: 12px; }
+.section-title { font-weight: 600; margin: 14px 0 6px; display: flex; align-items: center; gap: 8px; }
+.strat-item { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 6px 0; }
+.strat-item .meta { color: var(--muted); font-size: 11px; }
+.sig { padding: 6px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.sig:hover { background: var(--panel-2); }
+details summary { cursor: pointer; color: var(--muted); }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; background: var(--panel-2); padding: 0 3px; border-radius: 3px; }
+.toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+
+@media (max-width: 900px) {
+  .app { height: auto; }
+  .main { grid-template-columns: minmax(0, 1fr); }
+  .left { grid-template-rows: 62vh auto; }
+  .side { border-left: 0; border-top: 1px solid var(--line); min-height: 60vh; }
+  .bt-grid { grid-template-columns: minmax(0, 1fr); }
+  .topbar { padding: 8px 16px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <span class="brand">📈 StockPulse</span>
+    <nav class="nav"><a href="/">热门雷达</a><a href="/chart" class="on">图表 · 策略</a></nav>
+    <input id="symbolInput" list="symbolList" aria-label="股票代码" placeholder="代码">
+    <datalist id="symbolList"></datalist>
+    <div class="seg" id="intervals" role="group" aria-label="周期"></div>
+    <div class="dropdown">
+      <button id="indBtn" aria-haspopup="true">指标 ▾</button>
+      <div class="menu" id="indMenu"></div>
+    </div>
+    <div class="quote"><span class="px" id="qPx">—</span><span id="qChg"></span></div>
+    <span class="spacer"></span>
+    <span class="badge" id="provider">—</span>
+    <span class="muted" id="updated"></span>
+    <button id="themeBtn" title="切换主题" aria-label="切换主题">🌓</button>
+  </header>
+
+  <div class="main">
+    <section class="left">
+      <div class="chart-wrap">
+        <div id="chart"></div>
+        <div class="legend" id="legend"></div>
+        <div class="chart-msg" id="chartMsg">加载中…</div>
+      </div>
+      <div class="bottom" id="bottom">
+        <div class="bottom-head">
+          <b id="btTitle">回测结果</b>
+          <span class="muted" id="btSub"></span>
+          <span class="spacer"></span>
+          <button id="btClose">收起</button>
+        </div>
+        <div class="metrics" id="btMetrics"></div>
+        <div class="bt-grid">
+          <div>
+            <div class="eq-legend"><span><i style="background:var(--s1)"></i>策略净值</span><span><i style="background:var(--muted)"></i>买入持有</span></div>
+            <div id="equity"></div>
+          </div>
+          <div style="overflow:auto;max-height:240px">
+            <table>
+              <thead><tr><th>方向</th><th>开仓</th><th class="num">价格</th><th>平仓</th><th class="num">价格</th><th class="num">收益</th><th>原因</th></tr></thead>
+              <tbody id="btTrades"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="side">
+      <div class="tabs" role="tablist">
+        <button data-tab="watch" class="on">自选</button>
+        <button data-tab="strategy">策略</button>
+        <button data-tab="signals">信号</button>
+      </div>
+
+      <div class="tab on" id="tab-watch">
+        <div class="row"><input id="addSym" placeholder="添加代码，如 NVDA、0700.HK、BTC-USD"><button id="addBtn" style="flex:0 0 auto;white-space:nowrap">添加</button></div>
+        <table>
+          <thead><tr><th>代码</th><th class="num">最新</th><th class="num">涨跌</th><th></th></tr></thead>
+          <tbody id="watchBody"></tbody>
+        </table>
+        <p class="muted" style="font-size:11px">自选价格来自日线；点代码切换图表。支持美股、港股（0700.HK）、A 股（600519.SS）、加密货币（BTC-USD，仅 Yahoo 数据源）。</p>
+      </div>
+
+      <div class="tab" id="tab-strategy">
+        <div class="section-title">我的策略 <span class="spacer"></span><button id="newStrat">＋ 新建</button></div>
+        <div id="stratList"></div>
+
+        <div class="section-title" id="editorTitle">策略编辑器</div>
+        <div class="field"><label>从模板开始</label><select id="presetSel"><option value="">— 选择内置模板 —</option></select></div>
+        <div class="field"><label>名称</label><input id="fName" style="width:100%"></div>
+        <div class="row">
+          <div class="field"><label>周期</label><select id="fInterval"></select></div>
+          <div class="field" style="flex:2"><label>实时监控的代码（逗号分隔）</label><input id="fSymbols" placeholder="AAPL, NVDA"></div>
+        </div>
+        <div class="field"><label>参数（每行 名称=数值，可在规则中直接引用）</label><textarea id="fParams" rows="2" placeholder="fast=12&#10;slow=26"></textarea></div>
+        <div class="field"><label>做多开仓条件</label><textarea id="fLE" rows="2"></textarea></div>
+        <div class="field"><label>做多平仓条件</label><textarea id="fLX" rows="2"></textarea></div>
+        <details><summary>做空规则（可选）</summary>
+          <div class="field"><label>做空开仓条件</label><textarea id="fSE" rows="2"></textarea></div>
+          <div class="field"><label>做空平仓条件</label><textarea id="fSX" rows="2"></textarea></div>
+        </details>
+        <div class="grid3">
+          <div class="field"><label>止损 %</label><input id="fSL" type="number" min="0" step="0.5"></div>
+          <div class="field"><label>止盈 %</label><input id="fTP" type="number" min="0" step="0.5"></div>
+          <div class="field"><label>ATR 止损倍数</label><input id="fATR" type="number" min="0" step="0.5"></div>
+        </div>
+        <div class="row" style="justify-content:flex-start">
+          <label class="toggle" style="flex:0 0 auto"><input type="checkbox" id="fEnabled"> 启用实时信号</label>
+          <label class="toggle" style="flex:0 0 auto"><input type="checkbox" id="fNotify" checked> 推送 Telegram</label>
+        </div>
+        <div class="row">
+          <button class="primary" id="btBtn">回测（当前图表）</button>
+          <button id="saveBtn">保存</button>
+        </div>
+        <div id="formMsg"></div>
+        <details style="margin-top:10px"><summary>规则语法说明</summary>
+          <div style="font-size:12px;margin-top:6px">
+            <p>写法类似 Pine Script：每条规则是一个返回真/假的表达式，在每根 K 线<b>收盘</b>时计算，信号在<b>下一根 K 线开盘</b>执行。</p>
+            <p>行情：<code>open high low close volume hl2 hlc3 ohlc4</code></p>
+            <p>运算：<code>and or not</code>、<code>&gt; &lt; &gt;= &lt;= == !=</code>、<code>+ - * /</code>；<code>close[1]</code> 表示前一根 K 线的值。</p>
+            <p>函数：<span id="fnList"></span></p>
+            <p>示例：<br><code>crossover(ema(close, 12), ema(close, 26)) and rsi(close, 14) &lt; 70</code><br>
+            <code>close &gt; highest(high, 20)[1] and volume &gt; sma(volume, 20) * 1.5</code></p>
+          </div>
+        </details>
+      </div>
+
+      <div class="tab" id="tab-signals">
+        <div class="section-title">当前持仓（按策略模拟） <span class="spacer"></span><button id="runSig">立即检查</button></div>
+        <div style="overflow:auto"><table>
+          <thead><tr><th>代码</th><th>策略</th><th>状态</th><th class="num">开仓价</th><th class="num">浮盈</th><th class="num">止损</th></tr></thead>
+          <tbody id="posBody"></tbody>
+        </table></div>
+        <div class="section-title">最近信号</div>
+        <div id="sigList"></div>
+        <p class="muted" style="font-size:11px" id="sigNote"></p>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+const LWC = window.LightweightCharts;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = (v, d = 2) => v == null || Number.isNaN(v) ? "—" : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+const pctHtml = (v) => v == null ? "—" : `<span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : ""}${fmt(v)}%</span>`;
+const store = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } },
+                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+
+const INTERVALS = [["1m","1分"],["5m","5分"],["15m","15分"],["1h","1时"],["1d","日"],["1wk","周"]];
+// indicator key -> [label, default args, color slot]. Color follows the indicator, never its position.
+const INDICATORS = [
+  ["ema", "EMA", "20", "--s1"], ["ema2", "EMA (第二条)", "50", "--s2"], ["sma", "SMA", "200", "--s7"],
+  ["bb", "布林带", "20:2", "--s5"], ["vwap", "VWAP", "", "--s4"], ["supertrend", "SuperTrend", "10:3", null],
+  ["donchian", "唐奇安通道", "20", "--s3"], ["rsi", "RSI", "14", "--s7"], ["macd", "MACD", "12:26:9", null],
+  ["stoch", "随机指标 KD", "14:3", null], ["atr", "ATR", "14", "--s2"],
+];
+const SUB_COLORS = { "MACD": "--s1", "Signal": "--s2", "%K": "--s1", "%D": "--s2" };
+const ACTION = { BUY: ["买入", "up"], SELL: ["卖出", "down"], SHORT: ["卖空", "down"], COVER: ["平空", "up"] };
+const REASON = { signal: "信号", stop: "止损", take_profit: "止盈", reverse: "反手", open: "持仓中" };
+
+const state = {
+  symbol: store.get("sp.symbol", "AAPL"), interval: store.get("sp.interval", "1d"),
+  inds: store.get("sp.inds", { ema: "20", ema2: "50", rsi: "14" }),
+  backtest: null, editingId: null, meta: null, strategies: [],
+};
+
+// ---------------------------------------------------------------- API
+async function api(path, opts = {}) {
+  const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+  const tok = store.get("sp.token", "");
+  if (tok) headers.Authorization = "Bearer " + tok;
+  let res = await fetch(path, { ...opts, headers });
+  if (res.status === 401) {
+    const t = prompt("这个操作需要 API_TOKEN（在 .env 里）：");
+    if (!t) throw new Error("需要 API_TOKEN");
+    store.set("sp.token", t);
+    headers.Authorization = "Bearer " + t;
+    res = await fetch(path, { ...opts, headers });
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const d = body.detail;
+    const msg = d && d.errors ? d.errors.join("\n") : (typeof d === "string" ? d : JSON.stringify(d || res.status));
+    throw new Error(msg);
+  }
+  return body;
+}
+
+// ---------------------------------------------------------------- chart
+let chart = null, candles = null, volume = null, markersApi = null, seriesMap = new Map(), lastData = null;
+
+function timeFmt(t) {
+  const d = new Date(t * 1000);
+  return ["1d", "1wk"].includes(state.interval) ? d.toLocaleDateString(undefined, { timeZone: "UTC" }) : d.toLocaleString();
+}
+
+function chartOptions() {
+  return {
+    autoSize: true,
+    layout: { background: { color: css("--chart-bg") }, textColor: css("--muted"), fontSize: 11,
+              panes: { separatorColor: css("--line"), separatorHoverColor: css("--accent") } },
+    grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
+    rightPriceScale: { borderColor: css("--line") },
+    timeScale: { borderColor: css("--line"), timeVisible: !["1d", "1wk"].includes(state.interval), secondsVisible: false, rightOffset: 6 },
+    crosshair: { mode: LWC.CrosshairMode.Normal },
+    localization: { timeFormatter: timeFmt },
+  };
+}
+
+function buildChart() {
+  if (chart) chart.remove();
+  seriesMap = new Map();
+  chart = LWC.createChart($("chart"), chartOptions());
+  candles = chart.addSeries(LWC.CandlestickSeries, {
+    upColor: css("--up"), downColor: css("--down"), borderVisible: false, wickUpColor: css("--up"), wickDownColor: css("--down"),
+  });
+  volume = chart.addSeries(LWC.HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "vol", lastValueVisible: false, priceLineVisible: false });
+  chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+  markersApi = LWC.createSeriesMarkers(candles, []);
+  chart.subscribeCrosshairMove(updateLegend);
+}
+
+function indicatorSpecs() {
+  return Object.entries(state.inds).map(([k, args]) => {
+    const key = k === "ema2" ? "ema" : k;
+    return { slot: k, spec: args ? `${key}:${args}` : key };
+  });
+}
+
+function colorFor(s, slotKey) {
+  if (s.tone === "up") return css("--up");
+  if (s.tone === "down") return css("--down");
+  if (SUB_COLORS[s.name]) return css(SUB_COLORS[s.name]);
+  const def = INDICATORS.find(i => i[0] === slotKey);
+  return css((def && def[3]) || "--s1");
+}
+
+async function loadChart({ keepRange = false } = {}) {
+  const specs = indicatorSpecs();
+  $("chartMsg").textContent = keepRange ? "" : "加载中…";
+  let data;
+  try {
+    const q = new URLSearchParams({ symbol: state.symbol, interval: state.interval, limit: 1500, indicators: specs.map(s => s.spec).join(",") });
+    data = await api("/api/chart?" + q);
+  } catch (e) { $("chartMsg").textContent = "无法加载：" + e.message; return; }
+  $("chartMsg").textContent = "";
+  const range = keepRange && chart ? chart.timeScale().getVisibleLogicalRange() : null;
+  const ids = data.series.map(s => s.id).join("|");
+  if (!chart || !keepRange || !lastData || lastData.series.map(s => s.id).join("|") !== ids) buildChart();
+  lastData = data;
+
+  candles.setData(data.bars.map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
+  const upV = css("--up") + "66", dnV = css("--down") + "66";
+  volume.setData(data.bars.map(b => ({ time: b.time, value: b.volume, color: b.close >= b.open ? upV : dnV })));
+
+  const paneIndex = { price: 0 };
+  let nextPane = 1;
+  const specBySeries = (s) => specs.find(x => s.id === x.spec || s.id.startsWith(x.spec + ":") || s.group === x.spec);
+  for (const s of data.series) {
+    if (!(s.pane in paneIndex)) paneIndex[s.pane] = nextPane++;
+    const slot = (specBySeries(s) || {}).slot;
+    let ser = seriesMap.get(s.id);
+    if (!ser) {
+      const color = colorFor(s, slot);
+      if (s.kind === "histogram") {
+        ser = chart.addSeries(LWC.HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, paneIndex[s.pane]);
+      } else {
+        ser = chart.addSeries(LWC.LineSeries, { color, lineWidth: 2, priceLineVisible: false, lastValueVisible: s.pane !== "price",
+          crosshairMarkerRadius: 3, lineType: s.group && s.group.startsWith("supertrend") ? LWC.LineType.WithSteps : LWC.LineType.Simple }, paneIndex[s.pane]);
+      }
+      (s.levels || []).forEach(lv => ser.createPriceLine({ price: lv, color: css("--muted"), lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: false }));
+      seriesMap.set(s.id, ser);
+      ser._meta = { name: s.name, color: s.kind === "histogram" ? css("--muted") : color, pane: s.pane };
+    }
+    if (s.kind === "histogram") {
+      ser.setData(s.data.map(p => ({ ...p, color: p.value >= 0 ? css("--up") + "99" : css("--down") + "99" })));
+    } else ser.setData(s.data);
+  }
+  const panes = chart.panes();
+  panes.forEach((p, i) => p.setStretchFactor(i === 0 ? 3 : 1));
+
+  applyMarkers();
+  if (range) chart.timeScale().setVisibleLogicalRange(range);
+  else chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, data.bars.length - 160), to: data.bars.length + 5 });
+
+  const l = data.last;
+  $("qPx").textContent = fmt(l.price, l.price < 10 ? 4 : 2);
+  $("qChg").innerHTML = pctHtml(l.change_pct) + (l.forming ? ' <span class="badge">K 线进行中</span>' : "");
+  $("provider").textContent = { yfinance: "Yahoo Finance（延迟）", massive: "Massive 行情", demo: "演示数据" }[data.provider] || data.provider;
+  $("updated").textContent = "更新于 " + new Date().toLocaleTimeString();
+  document.title = `${data.symbol} ${fmt(l.price)} · StockPulse`;
+  updateLegend();
+}
+
+function applyMarkers() {
+  if (!markersApi || !lastData) return;
+  let marks = [];
+  const bt = state.backtest;
+  if (bt && bt.symbol === state.symbol && bt.interval === state.interval) {
+    marks = bt.events.map(e => markerFor(e.action, e.time, REASON[e.reason] || ""));
+  } else {
+    marks = (lastData.signals || []).map(s => markerFor(s.action, nextBarTime(s.bar_ts), "信号"));
+  }
+  const times = new Set(lastData.bars.map(b => b.time));
+  markersApi.setMarkers(marks.filter(m => times.has(m.time)).sort((a, b) => a.time - b.time));
+}
+function nextBarTime(t) {
+  const bars = lastData.bars; const i = bars.findIndex(b => b.time === t);
+  return i >= 0 && i + 1 < bars.length ? bars[i + 1].time : t;
+}
+function markerFor(action, time, note) {
+  const buy = action === "BUY" || action === "COVER";
+  return { time, position: buy ? "belowBar" : "aboveBar", shape: buy ? "arrowUp" : "arrowDown",
+           color: buy ? css("--up") : css("--down"), text: (ACTION[action] || [action])[0] + (note && note !== "信号" ? "·" + note : "") };
+}
+
+function updateLegend(param) {
+  if (!lastData) return;
+  const bars = lastData.bars;
+  let bar = null;
+  if (param && param.time !== undefined) bar = param.seriesData.get(candles);
+  if (!bar) bar = bars[bars.length - 1];
+  const t = param && param.time !== undefined ? param.time : bar.time;
+  const chg = bar.open ? (bar.close / bar.open - 1) * 100 : 0;
+  let html = `<div><span class="title">${esc(lastData.symbol)}</span> <span class="muted">${esc(state.interval)} · ${esc(timeFmt(t))}</span></div>
+    <div><span class="item">开<b>${fmt(bar.open)}</b></span><span class="item">高<b>${fmt(bar.high)}</b></span><span class="item">低<b>${fmt(bar.low)}</b></span><span class="item">收<b class="${chg >= 0 ? "up" : "down"}">${fmt(bar.close)}</b></span></div><div>`;
+  for (const [, ser] of seriesMap) {
+    const m = ser._meta;
+    let v = param && param.seriesData ? param.seriesData.get(ser) : null;
+    if (!v) { const d = ser.data(); v = d.length ? d[d.length - 1] : null; }
+    html += `<span class="item"><span class="sw" style="background:${m.color}"></span>${esc(m.name)} <b>${v && v.value != null ? fmt(v.value) : "—"}</b></span>`;
+  }
+  $("legend").innerHTML = html + "</div>";
+}
+
+// ---------------------------------------------------------------- toolbar
+function renderIntervals() {
+  $("intervals").innerHTML = INTERVALS.map(([k, l]) => `<button data-iv="${k}" class="${k === state.interval ? "on" : ""}">${l}</button>`).join("");
+  $("intervals").querySelectorAll("button").forEach(b => b.onclick = () => { state.interval = b.dataset.iv; store.set("sp.interval", state.interval); renderIntervals(); loadChart(); });
+}
+function renderIndMenu() {
+  $("indMenu").innerHTML = INDICATORS.map(([k, label, def]) => `<label><input type="checkbox" data-ind="${k}" ${k in state.inds ? "checked" : ""}> ${label}
+      ${def ? `<input type="text" data-arg="${k}" value="${esc(state.inds[k] ?? def)}" title="参数，用冒号分隔">` : ""}</label>`).join("")
+    + `<div class="muted" style="font-size:11px;padding:4px">参数用冒号分隔，如 布林带 20:2</div>`;
+  $("indMenu").querySelectorAll("input").forEach(inp => inp.onchange = () => {
+    const next = {};
+    INDICATORS.forEach(([k, , def]) => {
+      if ($("indMenu").querySelector(`[data-ind="${k}"]`).checked) {
+        const a = $("indMenu").querySelector(`[data-arg="${k}"]`);
+        next[k] = a ? a.value.trim() : def;
+      }
+    });
+    state.inds = next; store.set("sp.inds", next); loadChart({ keepRange: true });
+  });
+}
+$("indBtn").onclick = (e) => { e.stopPropagation(); $("indMenu").classList.toggle("open"); };
+document.addEventListener("click", (e) => { if (!$("indMenu").contains(e.target)) $("indMenu").classList.remove("open"); });
+
+function setSymbol(sym, interval) {
+  sym = (sym || "").trim().toUpperCase();
+  if (!sym) return;
+  state.symbol = sym; store.set("sp.symbol", sym);
+  if (interval) { state.interval = interval; store.set("sp.interval", interval); renderIntervals(); }
+  $("symbolInput").value = sym;
+  loadChart();
+  renderWatch();
+}
+$("symbolInput").addEventListener("keydown", (e) => { if (e.key === "Enter") setSymbol(e.target.value); });
+$("symbolInput").addEventListener("change", (e) => setSymbol(e.target.value));
+
+// ---------------------------------------------------------------- watchlist
+let watch = [];
+async function loadWatch(retry = true) {
+  try { watch = await api("/api/watchlist"); } catch (e) { watch = []; }
+  renderWatch();
+  // newly added symbols are fetched in the background; check back shortly
+  if (retry && watch.some(w => w.price == null)) setTimeout(() => loadWatch(false), 4000);
+}
+function renderWatch() {
+  $("symbolList").innerHTML = watch.map(w => `<option value="${esc(w.symbol)}">`).join("");
+  $("watchBody").innerHTML = watch.map(w => `<tr class="click ${w.symbol === state.symbol ? "active" : ""}" data-s="${esc(w.symbol)}">
+      <td><b>${esc(w.symbol)}</b></td><td class="num">${fmt(w.price)}</td><td class="num">${pctHtml(w.change_pct)}</td>
+      <td class="num"><button class="danger" data-rm="${esc(w.symbol)}" title="移除" aria-label="移除 ${esc(w.symbol)}">×</button></td></tr>`).join("")
+    || `<tr><td colspan="4" class="muted">还没有自选股</td></tr>`;
+  $("watchBody").querySelectorAll("tr.click").forEach(tr => tr.onclick = (e) => { if (!e.target.dataset.rm) setSymbol(tr.dataset.s); });
+  $("watchBody").querySelectorAll("[data-rm]").forEach(b => b.onclick = async () => {
+    await saveWatch(watch.map(w => w.symbol).filter(s => s !== b.dataset.rm));
+  });
+}
+async function saveWatch(list) {
+  try { await api("/api/watchlist", { method: "PUT", body: JSON.stringify(list) }); } catch (e) { alert(e.message); }
+  loadWatch();
+}
+$("addBtn").onclick = () => {
+  const s = $("addSym").value.trim().toUpperCase(); if (!s) return;
+  $("addSym").value = ""; saveWatch([...watch.map(w => w.symbol), s]);
+};
+$("addSym").addEventListener("keydown", e => { if (e.key === "Enter") $("addBtn").click(); });
+
+// ---------------------------------------------------------------- tabs
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === "tab-" + b.dataset.tab));
+  store.set("sp.tab", b.dataset.tab);
+  if (b.dataset.tab === "signals") loadSignals();
+});
+
+// ---------------------------------------------------------------- strategies
+function formToConfig() {
+  const params = {};
+  $("fParams").value.split(/\n|,/).map(x => x.trim()).filter(Boolean).forEach(line => {
+    const [k, v] = line.split("=").map(x => x.trim()); if (k) params[k] = Number(v);
+  });
+  return {
+    id: state.editingId, name: $("fName").value.trim(), interval: $("fInterval").value,
+    symbols: $("fSymbols").value.split(/[,\s]+/).map(x => x.trim().toUpperCase()).filter(Boolean),
+    params, long_entry: $("fLE").value, long_exit: $("fLX").value, short_entry: $("fSE").value, short_exit: $("fSX").value,
+    stop_loss_pct: Number($("fSL").value || 0), take_profit_pct: Number($("fTP").value || 0), atr_stop_mult: Number($("fATR").value || 0),
+    enabled: $("fEnabled").checked, notify: $("fNotify").checked, preset: $("presetSel").value || null,
+  };
+}
+function configToForm(c) {
+  state.editingId = c.id || null;
+  $("editorTitle").textContent = c.id ? `编辑策略 #${c.id}` : "新策略";
+  $("fName").value = c.name || ""; $("fInterval").value = c.interval || state.interval;
+  $("fSymbols").value = (c.symbols || []).join(", ");
+  $("fParams").value = Object.entries(c.params || {}).map(([k, v]) => `${k}=${v}`).join("\n");
+  $("fLE").value = c.long_entry || ""; $("fLX").value = c.long_exit || ""; $("fSE").value = c.short_entry || ""; $("fSX").value = c.short_exit || "";
+  $("fSL").value = c.stop_loss_pct || ""; $("fTP").value = c.take_profit_pct || ""; $("fATR").value = c.atr_stop_mult || "";
+  $("fEnabled").checked = !!c.enabled; $("fNotify").checked = c.notify !== false;
+  $("formMsg").innerHTML = "";
+  store.set("sp.draft", c);
+}
+async function loadMeta() {
+  state.meta = await api("/api/strategy/meta");
+  $("presetSel").innerHTML = `<option value="">— 选择内置模板 —</option>` +
+    Object.entries(state.meta.presets).map(([k, p]) => `<option value="${k}">${esc(p.name)}</option>`).join("");
+  $("fInterval").innerHTML = state.meta.intervals.map(i => `<option>${i}</option>`).join("");
+  $("fnList").innerHTML = state.meta.functions.map(f => `<code>${esc(f)}</code>`).join(" ");
+}
+$("presetSel").onchange = () => {
+  const p = state.meta.presets[$("presetSel").value]; if (!p) return;
+  configToForm({ ...p, interval: state.interval, symbols: [state.symbol], id: null });
+  $("formMsg").innerHTML = `<div class="muted">${esc(p.description)}</div>`;
+};
+$("newStrat").onclick = () => { $("presetSel").value = ""; configToForm({ name: "", interval: state.interval, symbols: [state.symbol] }); };
+
+async function loadStrategies() {
+  state.strategies = await api("/api/strategies");
+  $("stratList").innerHTML = state.strategies.map(s => `<div class="strat-item">
+      <div class="row" style="margin:0"><b style="flex:2">${esc(s.name)}</b>
+        <label class="toggle" style="flex:0 0 auto" title="启用实时信号"><input type="checkbox" data-en="${s.id}" ${s.enabled ? "checked" : ""}> 实时</label></div>
+      <div class="meta">${esc(s.interval)} · ${esc((s.symbols || []).join(", ") || "未设置代码")}</div>
+      <div class="row" style="margin:4px 0 0"><button data-edit="${s.id}">编辑</button><button data-bt="${s.id}">回测</button><button class="danger" data-del="${s.id}">删除</button></div>
+    </div>`).join("") || `<div class="muted">还没有策略。选一个模板或新建，回测满意后保存并勾选“启用实时信号”。</div>`;
+  const byId = (id) => state.strategies.find(s => String(s.id) === String(id));
+  $("stratList").querySelectorAll("[data-edit]").forEach(b => b.onclick = () => { $("presetSel").value = ""; configToForm(byId(b.dataset.edit)); });
+  $("stratList").querySelectorAll("[data-bt]").forEach(b => b.onclick = () => { const s = byId(b.dataset.bt); configToForm(s); runBacktest(); });
+  $("stratList").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    if (!confirm("删除这个策略？")) return;
+    try { await api(`/api/strategies/${b.dataset.del}`, { method: "DELETE" }); } catch (e) { alert(e.message); }
+    loadStrategies();
+  });
+  $("stratList").querySelectorAll("[data-en]").forEach(b => b.onchange = async () => {
+    const s = { ...byId(b.dataset.en), enabled: b.checked };
+    try { await api("/api/strategies", { method: "POST", body: JSON.stringify(s) }); } catch (e) { alert(e.message); b.checked = !b.checked; }
+    loadStrategies();
+  });
+}
+
+$("saveBtn").onclick = async () => {
+  try {
+    const saved = await api("/api/strategies", { method: "POST", body: JSON.stringify(formToConfig()) });
+    configToForm(saved);
+    $("formMsg").innerHTML = `<div class="ok">已保存${saved.enabled ? "，实时信号已启用" : ""}</div>`;
+    loadStrategies();
+  } catch (e) { $("formMsg").innerHTML = `<div class="errors">${esc(e.message)}</div>`; }
+};
+
+let eqChart = null;
+async function runBacktest() {
+  const cfg = formToConfig();
+  $("btBtn").disabled = true; $("btBtn").textContent = "回测中…"; $("formMsg").innerHTML = "";
+  try {
+    const bt = await api("/api/backtest", { method: "POST", body: JSON.stringify({ strategy: { ...cfg, interval: state.interval }, symbol: state.symbol }) });
+    state.backtest = bt;
+    renderBacktest(bt, cfg.name || "未命名策略");
+    applyMarkers();
+  } catch (e) { $("formMsg").innerHTML = `<div class="errors">${esc(e.message)}</div>`; }
+  $("btBtn").disabled = false; $("btBtn").textContent = "回测（当前图表）";
+}
+$("btBtn").onclick = runBacktest;
+$("btClose").onclick = () => { $("bottom").classList.remove("open"); state.backtest = null; applyMarkers(); };
+
+function renderBacktest(bt, name) {
+  const m = bt.metrics;
+  $("bottom").classList.add("open");
+  $("btTitle").textContent = `回测：${name} · ${bt.symbol} · ${bt.interval}`;
+  $("btSub").textContent = `${new Date(m.start * 1000).toLocaleDateString(undefined, {timeZone: "UTC"})} → ${new Date(m.end * 1000).toLocaleDateString(undefined, {timeZone: "UTC"})} · ${m.bars} 根 K 线 · 手续费 ${bt.costs_bps.commission}bp + 滑点 ${bt.costs_bps.slippage}bp，收盘出信号、次根开盘成交`;
+  const cards = [
+    ["总收益", pctHtml(m.total_return_pct)], ["买入持有", pctHtml(m.buy_hold_pct)], ["年化", pctHtml(m.cagr_pct)],
+    ["最大回撤", `<span class="down">${fmt(m.max_drawdown_pct)}%</span>`], ["夏普", fmt(m.sharpe)], ["索提诺", fmt(m.sortino)],
+    ["交易次数", m.trades], ["胜率", m.win_rate_pct == null ? "—" : fmt(m.win_rate_pct, 1) + "%"],
+    ["盈亏比", fmt(m.profit_factor)], ["平均盈利", pctHtml(m.avg_win_pct)], ["平均亏损", pctHtml(m.avg_loss_pct)], ["持仓时间占比", fmt(m.exposure_pct, 1) + "%"],
+  ];
+  $("btMetrics").innerHTML = cards.map(([k, v]) => `<div class="metric"><b>${v}</b><span>${k}</span></div>`).join("")
+    + (bt.position ? `<div class="metric"><b class="${bt.position > 0 ? "up" : "down"}">${bt.position > 0 ? "持多" : "持空"}</b><span>当前状态 · 开仓 ${fmt(bt.entry_price)}</span></div>` : "")
+    + (bt.pending.length ? `<div class="metric"><b>${bt.pending.map(p => ACTION[p.action][0]).join("→")}</b><span>下一根 K 线待执行</span></div>` : "");
+  $("btTrades").innerHTML = bt.trades.slice().reverse().map(t => `<tr>
+      <td class="${t.side === "long" ? "up" : "down"}">${t.side === "long" ? "多" : "空"}</td>
+      <td>${esc(timeFmt(t.entry_time))}</td><td class="num">${fmt(t.entry_price)}</td>
+      <td>${t.exit_time ? esc(timeFmt(t.exit_time)) : "—"}</td><td class="num">${fmt(t.exit_price)}</td>
+      <td class="num">${pctHtml(t.pnl_pct)}</td><td>${esc(REASON[t.exit_reason] || t.exit_reason)}</td></tr>`).join("")
+    || `<tr><td colspan="7" class="muted">这段时间没有触发交易</td></tr>`;
+
+  if (eqChart) eqChart.remove();
+  eqChart = LWC.createChart($("equity"), { ...chartOptions(), autoSize: true, timeScale: { borderColor: css("--line"), timeVisible: false } });
+  const eq = eqChart.addSeries(LWC.AreaSeries, { priceFormat: { type: "price", precision: 0, minMove: 1 }, lineColor: css("--s1"), topColor: css("--s1") + "40", bottomColor: css("--s1") + "05", lineWidth: 2, priceLineVisible: false });
+  eq.setData(bt.equity);
+  if (lastData && bt.equity.length) {
+    const start = bt.equity[0].value, base = lastData.bars.find(b => b.time >= bt.equity[0].time);
+    if (base) {
+      const bh = eqChart.addSeries(LWC.LineSeries, { color: css("--muted"), lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
+      const startPx = base.close;
+      bh.setData(lastData.bars.filter(b => b.time >= base.time && b.time <= bt.equity[bt.equity.length - 1].time).map(b => ({ time: b.time, value: start * b.close / startPx })));
+    }
+  }
+  eqChart.timeScale().fitContent();
+}
+
+// ---------------------------------------------------------------- signals
+async function loadSignals() {
+  const [pos, sigs] = await Promise.all([api("/api/positions").catch(() => []), api("/api/signals?limit=60").catch(() => [])]);
+  $("posBody").innerHTML = pos.map(p => `<tr class="click" data-s="${esc(p.symbol)}" data-iv="${esc(p.interval)}">
+      <td><b>${esc(p.symbol)}</b></td><td>${esc(p.strategy)}</td>
+      <td>${p.position > 0 ? '<span class="up">持多</span>' : p.position < 0 ? '<span class="down">持空</span>' : '<span class="muted">空仓</span>'}
+        ${p.signals && p.signals.length ? `<span class="badge">待${esc(ACTION[p.signals[p.signals.length - 1].action][0])}</span>` : ""}</td>
+      <td class="num">${fmt(p.entry_price)}</td><td class="num">${pctHtml(p.unrealized_pct)}</td><td class="num">${fmt(p.stop)}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="muted">没有启用的策略。在「策略」页保存策略并勾选“启用实时信号”。</td></tr>`;
+  $("posBody").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => setSymbol(tr.dataset.s, tr.dataset.iv));
+  $("sigList").innerHTML = sigs.map(s => {
+    const [a, cls] = ACTION[s.action] || [s.action, ""];
+    return `<div class="sig" data-s="${esc(s.symbol)}" data-iv="${esc(s.interval)}"><b class="${cls}">${a}</b> <b>${esc(s.symbol)}</b>
+      @ ${fmt(s.price)} <span class="badge">${esc(s.interval)}</span> <span class="badge">${esc(REASON[s.reason] || s.reason)}</span>
+      <div class="muted" style="font-size:11px">${esc(s.strategy)} · K 线 ${esc(new Date(s.bar_ts * 1000).toLocaleString())} · 记录于 ${esc(new Date(s.created).toLocaleString())}</div></div>`;
+  }).join("") || `<div class="muted">还没有信号</div>`;
+  $("sigList").querySelectorAll(".sig").forEach(d => d.onclick = () => setSymbol(d.dataset.s, d.dataset.iv));
+  try {
+    const st = await api("/api/status");
+    $("sigNote").textContent = `已启用 ${st.active_strategies} 个策略，每 ${st.signal_refresh_minutes} 分钟拉取新 K 线并检查；新信号会${st.telegram ? "推送到 Telegram" : "显示在这里（未配置 Telegram）"}。`;
+  } catch (e) {}
+}
+$("runSig").onclick = async () => {
+  $("runSig").disabled = true;
+  try { const r = await api("/api/signals/run", { method: "POST" }); if (!r.new.length) $("sigNote").textContent = "检查完成，没有新信号。"; } catch (e) { alert(e.message); }
+  $("runSig").disabled = false; loadSignals();
+};
+
+// ---------------------------------------------------------------- theme & boot
+$("themeBtn").onclick = () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark"; store.set("theme", root.dataset.theme);
+  if (chart) { lastData = null; loadChart({ keepRange: false }); }
+  if (state.backtest) renderBacktest(state.backtest, $("fName").value || "未命名策略");
+};
+(() => { const t = store.get("theme", null); if (t) document.documentElement.dataset.theme = t; })();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { lastData = null; loadChart(); });
+
+const params = new URLSearchParams(location.search);
+if (params.get("symbol")) state.symbol = params.get("symbol").toUpperCase();
+if (params.get("interval")) state.interval = params.get("interval");
+$("symbolInput").value = state.symbol;
+renderIntervals(); renderIndMenu();
+loadChart(); loadWatch();
+loadMeta().then(() => { configToForm(store.get("sp.draft", { name: "", interval: state.interval, symbols: [state.symbol] })); }).catch(() => {});
+loadStrategies().catch(() => {});
+const tab = store.get("sp.tab", "watch"); const tb = document.querySelector(`.tabs button[data-tab="${tab}"]`); if (tb) tb.click();
+
+// Live updates: chart every 30s (the server throttles provider pulls); watchlist every minute.
+setInterval(() => { if (!document.hidden) loadChart({ keepRange: true }); }, 30000);
+setInterval(() => { if (!document.hidden) loadWatch(); }, 60000);
+setInterval(() => { if (!document.hidden && $("tab-signals").classList.contains("on")) loadSignals(); }, 60000);
+</script>
+</body>
+</html>

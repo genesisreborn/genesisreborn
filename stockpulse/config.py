@@ -38,9 +38,19 @@ class Settings:
     # Claude is called only when a report is generated; this blocks repeated
     # manual triggers inside the window (scheduled reports always run).
     report_cooldown_minutes: int = field(default_factory=lambda: int(os.getenv("REPORT_COOLDOWN_MINUTES", "30")))
-    # If set, POST /api/report requires "Authorization: Bearer <token>" or ?token=
-    report_api_token: str = field(default_factory=lambda: os.getenv("REPORT_API_TOKEN", ""))
+    # If set, every write/costly endpoint (reports, strategies, watchlist) requires
+    # "Authorization: Bearer <token>" or ?token=
+    report_api_token: str = field(default_factory=lambda: os.getenv("API_TOKEN", "") or os.getenv("REPORT_API_TOKEN", ""))
     reports_dir: str = field(default_factory=lambda: os.getenv("REPORTS_DIR", "data/reports"))
+
+    # ---- charts / strategies ----
+    # Optional Massive (formerly Polygon.io) key for market data; yfinance is used otherwise.
+    massive_api_key: str = field(default_factory=lambda: os.getenv("MASSIVE_API_KEY", "") or os.getenv("POLYGON_API_KEY", ""))
+    massive_base_url: str = field(default_factory=lambda: os.getenv("MASSIVE_BASE_URL", "https://api.massive.com").rstrip("/"))
+    # How often to pull new bars and evaluate enabled strategies
+    signal_refresh_minutes: int = field(default_factory=lambda: int(os.getenv("SIGNAL_REFRESH_MINUTES", "5")))
+    commission_bps: float = field(default_factory=lambda: float(os.getenv("COMMISSION_BPS", "5")))
+    slippage_bps: float = field(default_factory=lambda: float(os.getenv("SLIPPAGE_BPS", "5")))
 
     db_path: str = field(default_factory=lambda: os.getenv("DB_PATH", "data/stockpulse.db"))
     watchlist: list[str] = field(default_factory=lambda: [t.upper() for t in _list("WATCHLIST", "AAPL,NVDA,TSLA,MSFT,AMZN")])

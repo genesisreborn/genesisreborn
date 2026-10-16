@@ -2,6 +2,8 @@
 
 - refresh (every REFRESH_MINUTES): news + quotes + scoring, rule-based views. No Claude.
 - daily report (DAILY_REPORT_TIMES): one Claude call -> report -> Telegram.
+- signals (every SIGNAL_REFRESH_MINUTES, only if strategies are enabled): pull new bars,
+  run enabled strategies, push new trade signals to Telegram.
 """
 from __future__ import annotations
 
@@ -16,6 +18,7 @@ from .config import Settings
 from .db import Database
 from .pipeline import run_cycle
 from .report import generate_report
+from .strategy.signals import SignalEngine
 from .telegram_bot import TelegramNotifier
 
 log = logging.getLogger(__name__)
@@ -28,6 +31,7 @@ class Engine:
         self.settings = settings
         self.db = Database(settings.db_path)
         self.notifier = TelegramNotifier(settings, self.db)
+        self.signals = SignalEngine(self.db, settings)
         self.scheduler = BackgroundScheduler(timezone=settings.timezone)
 
     def refresh(self) -> dict:
@@ -56,6 +60,23 @@ class Engine:
         except Exception:  # noqa: BLE001 - keep the scheduler alive
             log.exception("scheduled report failed")
 
+    def run_signals(self) -> list[dict]:
+        new = self.signals.run()
+        if self.settings.telegram_enabled:
+            for sig in new:
+                if sig.get("notify", True):
+                    self.notifier.send_signal(sig)
+        return new
+
+    def _scheduled_signals(self) -> None:
+        try:
+            for sym in self.db.get_watchlist(self.settings.watchlist):  # keep watchlist quotes fresh
+                self.signals.store.update(sym, "1d")
+            if self.db.list_strategies(enabled_only=True):
+                self.run_signals()
+        except Exception:  # noqa: BLE001 - keep the scheduler alive
+            log.exception("signal run failed")
+
     def _safe_refresh(self) -> None:
         try:
             self.refresh()
@@ -71,6 +92,9 @@ class Engine:
             h, m = (int(x) for x in hhmm.split(":"))
             self.scheduler.add_job(self._scheduled_report, CronTrigger(hour=h, minute=m, timezone=s.timezone),
                                    id=f"daily-{hhmm}", max_instances=1, coalesce=True)
+        self.scheduler.add_job(self._scheduled_signals, "interval", minutes=s.signal_refresh_minutes, id="signals",
+                               next_run_time=datetime.now(ZoneInfo(s.timezone)) + timedelta(seconds=20),
+                               max_instances=1, coalesce=True)
         self.scheduler.start()
         if s.telegram_enabled:
             self.notifier.start_polling()

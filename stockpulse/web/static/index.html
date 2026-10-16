@@ -25,6 +25,7 @@ body { margin: 0; background: var(--bg); color: var(--text);
 header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line);
   background: var(--panel); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
 header h1 { font-size: 18px; margin: 0; }
+.navlink { color: var(--accent); text-decoration: none; font-weight: 600; white-space: nowrap; }
 header .meta { color: var(--muted); font-size: 12px; }
 header .spacer { flex: 1; }
 button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 7px 12px; cursor: pointer; font: inherit; }
@@ -90,6 +91,7 @@ svg.spark { vertical-align: middle; }
 <body>
 <header>
   <h1>📈 StockPulse 热门股雷达</h1>
+  <a href="/chart" class="navlink">图表 · 策略 →</a>
   <span class="meta" id="meta">加载中…</span>
   <span class="spacer"></span>
   <span class="meta" id="status"></span>
@@ -242,7 +244,7 @@ async function openStock(t) {
     return `<div class="comp"><span>${name}</span><span class="bar"><i style="width:${val / max * 100}%"></i></span><span class="num">${val}</span></div>`;
   }).join("");
   d.innerHTML = `<button class="ghost" onclick="$('drawer').classList.remove('open')" style="float:right">关闭 ✕</button>
-    <h3>${esc(t)} ${r.signal ? signalBadge(r.signal) : ""}</h3>
+    <h3>${esc(t)} ${r.signal ? signalBadge(r.signal) : ""} <a class="navlink" style="font-size:13px" href="/chart?symbol=${encodeURIComponent(t)}">看图表 →</a></h3>
     <div class="kv">
       <div><b class="num">${r.score != null ? r.score.toFixed(0) : "—"}</b><span>热度分</span></div>
       <div><b>${money(r.price)}</b><span>价格</span></div>
