@@ -107,6 +107,7 @@ tr.active td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .row > * { flex: 1; }
 .field { margin: 8px 0; }
 .field label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+.field input, .field select { width: 100%; }
 .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .errors { color: var(--down); font-size: 12px; white-space: pre-wrap; }
 .ok { color: var(--up); font-size: 12px; }
@@ -162,6 +163,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
           <span class="spacer"></span>
           <button id="btClose">收起</button>
         </div>
+        <div id="btView">
         <div class="metrics" id="btMetrics"></div>
         <div class="bt-grid">
           <div>
@@ -175,6 +177,18 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
             </table>
           </div>
         </div>
+        </div>
+        <div id="scanView" hidden>
+          <div class="metrics" id="scanMetrics"></div>
+          <div style="overflow:auto;padding:0 12px 12px">
+            <table>
+              <thead><tr><th>代码</th><th>当前</th><th>下一根 K 线</th><th class="num">收盘</th><th class="num">涨跌</th>
+                <th class="num">策略收益</th><th class="num">买入持有</th><th class="num">最大回撤</th><th class="num">胜率</th><th class="num">交易</th></tr></thead>
+              <tbody id="scanBody"></tbody>
+            </table>
+            <p class="muted" style="font-size:11px">回测区间为每个代码最近最多 1500 根已收盘 K 线，含手续费和滑点。点击一行在图表上查看该代码的回测。</p>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -183,6 +197,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
         <button data-tab="watch" class="on">自选</button>
         <button data-tab="strategy">策略</button>
         <button data-tab="signals">信号</button>
+        <button data-tab="alerts">提醒</button>
       </div>
 
       <div class="tab on" id="tab-watch">
@@ -225,6 +240,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
           <button class="primary" id="btBtn">回测（当前图表）</button>
           <button id="saveBtn">保存</button>
         </div>
+        <div class="row">
+          <select id="scanUniverse" aria-label="扫描范围">
+            <option value="both">自选 + 热门股</option><option value="watchlist">仅自选</option><option value="hot">仅热门股</option>
+          </select>
+          <button id="scanBtn">扫描：谁现在有信号</button>
+        </div>
         <div id="formMsg"></div>
         <details style="margin-top:10px"><summary>规则语法说明</summary>
           <div style="font-size:12px;margin-top:6px">
@@ -247,6 +268,35 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
         <div class="section-title">最近信号</div>
         <div id="sigList"></div>
         <p class="muted" style="font-size:11px" id="sigNote"></p>
+      </div>
+
+      <div class="tab" id="tab-alerts">
+        <div class="section-title">新建提醒</div>
+        <div class="row">
+          <div class="field"><label>代码</label><input id="aSym"></div>
+          <div class="field"><label>周期</label><select id="aInterval"></select></div>
+        </div>
+        <div class="field"><label>条件</label>
+          <select id="aType" style="width:100%">
+            <option value="cross_up">价格上穿</option><option value="cross_down">价格下穿</option>
+            <option value="above">收盘高于</option><option value="below">收盘低于</option>
+            <option value="rsi_below">RSI(14) 低于</option><option value="rsi_above">RSI(14) 高于</option>
+            <option value="pct_up">单根 K 线涨幅超过 %</option><option value="pct_down">单根 K 线跌幅超过 %</option>
+            <option value="vol_spike">成交量超过 20 均量的倍数</option>
+            <option value="custom">自定义规则</option>
+          </select>
+        </div>
+        <div class="field" id="aValueRow"><label>数值</label><input id="aValue" type="number" step="any" style="width:100%"></div>
+        <div class="field" id="aCustomRow" hidden><label>自定义条件（规则语法同策略）</label><textarea id="aCustom" rows="2" placeholder="crossover(ema(close, 20), sma(close, 50))"></textarea></div>
+        <div class="row">
+          <div class="field"><label>触发方式</label><select id="aMode"><option value="once">只提醒一次</option><option value="every_bar">每根 K 线都提醒</option></select></div>
+          <div class="field"><label>备注</label><input id="aNote"></div>
+        </div>
+        <div class="row"><button class="primary" id="aSave">添加提醒</button></div>
+        <div id="aMsg"></div>
+        <p class="muted" style="font-size:11px">提醒在 K 线收盘时检查（想更及时就选 1 分钟或 5 分钟周期），触发后推送 Telegram。价格类提醒会在图表上画出虚线。</p>
+        <div class="section-title">我的提醒 <span class="spacer"></span><button id="aRun">立即检查</button></div>
+        <div id="alertList"></div>
       </div>
     </aside>
   </div>
@@ -396,6 +446,7 @@ async function loadChart({ keepRange = false } = {}) {
   panes.forEach((p, i) => p.setStretchFactor(i === 0 ? 3 : 1));
 
   applyMarkers();
+  drawAlertLines();
   if (range) chart.timeScale().setVisibleLogicalRange(range);
   else chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, data.bars.length - 160), to: data.bars.length + 5 });
 
@@ -406,6 +457,21 @@ async function loadChart({ keepRange = false } = {}) {
   $("updated").textContent = "更新于 " + new Date().toLocaleTimeString();
   document.title = `${data.symbol} ${fmt(l.price)} · StockPulse`;
   updateLegend();
+}
+
+let alertLines = [], alertGen = 0;
+async function drawAlertLines() {
+  if (!candles) return;
+  const gen = ++alertGen;
+  let list = [];
+  try { list = await api("/api/alerts?symbol=" + encodeURIComponent(state.symbol)); } catch (e) { return; }
+  if (gen !== alertGen) return;  // a newer redraw started while we were fetching
+  alertLines.forEach(l => { try { candles.removePriceLine(l); } catch (e) {} });
+  alertLines = [];
+  list.filter(a => a.active && a.level != null).forEach(a => {
+    alertLines.push(candles.createPriceLine({ price: a.level, color: css("--s4"), lineWidth: 1, lineStyle: LWC.LineStyle.Dashed,
+      axisLabelVisible: true, title: "🔔 " + (a.note || "提醒") }));
+  });
 }
 
 function applyMarkers() {
@@ -519,6 +585,7 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === "tab-" + b.dataset.tab));
   store.set("sp.tab", b.dataset.tab);
   if (b.dataset.tab === "signals") loadSignals();
+  if (b.dataset.tab === "alerts") { $("aSym").value = state.symbol; $("aInterval").value = state.interval; $("aType").onchange(); loadAlerts(); }
 });
 
 // ---------------------------------------------------------------- strategies
@@ -552,6 +619,7 @@ async function loadMeta() {
   $("presetSel").innerHTML = `<option value="">— 选择内置模板 —</option>` +
     Object.entries(state.meta.presets).map(([k, p]) => `<option value="${k}">${esc(p.name)}</option>`).join("");
   $("fInterval").innerHTML = state.meta.intervals.map(i => `<option>${i}</option>`).join("");
+  $("aInterval").innerHTML = $("fInterval").innerHTML; $("aInterval").value = state.interval;
   $("fnList").innerHTML = state.meta.functions.map(f => `<code>${esc(f)}</code>`).join(" ");
 }
 $("presetSel").onchange = () => {
@@ -610,7 +678,7 @@ $("btClose").onclick = () => { $("bottom").classList.remove("open"); state.backt
 
 function renderBacktest(bt, name) {
   const m = bt.metrics;
-  $("bottom").classList.add("open");
+  $("bottom").classList.add("open"); $("btView").hidden = false; $("scanView").hidden = true;
   $("btTitle").textContent = `回测：${name} · ${bt.symbol} · ${bt.interval}`;
   $("btSub").textContent = `${new Date(m.start * 1000).toLocaleDateString(undefined, {timeZone: "UTC"})} → ${new Date(m.end * 1000).toLocaleDateString(undefined, {timeZone: "UTC"})} · ${m.bars} 根 K 线 · 手续费 ${bt.costs_bps.commission}bp + 滑点 ${bt.costs_bps.slippage}bp，收盘出信号、次根开盘成交`;
   const cards = [
@@ -643,6 +711,91 @@ function renderBacktest(bt, name) {
   }
   eqChart.timeScale().fitContent();
 }
+
+// ---------------------------------------------------------------- scanner
+async function runScan() {
+  const cfg = formToConfig();
+  $("scanBtn").disabled = true; $("scanBtn").textContent = "扫描中…（首次需要下载数据）"; $("formMsg").innerHTML = "";
+  try {
+    const out = await api("/api/scan", { method: "POST", body: JSON.stringify({ strategy: { ...cfg, interval: state.interval }, universe: $("scanUniverse").value }) });
+    renderScan(out, cfg);
+  } catch (e) { $("formMsg").innerHTML = `<div class="errors">${esc(e.message)}</div>`; }
+  $("scanBtn").disabled = false; $("scanBtn").textContent = "扫描：谁现在有信号";
+}
+$("scanBtn").onclick = runScan;
+
+function renderScan(out, cfg) {
+  const sm = out.summary;
+  $("bottom").classList.add("open"); $("btView").hidden = true; $("scanView").hidden = false;
+  state.backtest = null; applyMarkers();
+  $("btTitle").textContent = `扫描：${out.strategy || "未命名策略"} · ${out.interval}`;
+  $("btSub").textContent = `${sm.ok}/${sm.symbols} 个代码有数据`;
+  const cards = sm.ok ? [
+    ["待开仓信号", `<span class="up">${sm.entry_signals}</span>`], ["待平仓信号", sm.exit_signals], ["持仓中", sm.in_position],
+    ["收益中位数", pctHtml(sm.median_return_pct)], ["盈利的代码占比", fmt(sm.profitable_pct, 1) + "%"],
+    ["跑赢买入持有占比", fmt(sm.beat_buy_hold_pct, 1) + "%"], ["回撤中位数", `<span class="down">${fmt(sm.median_max_drawdown_pct)}%</span>`],
+    ["总交易次数", sm.total_trades],
+  ] : [];
+  $("scanMetrics").innerHTML = cards.map(([k, v]) => `<div class="metric"><b>${v}</b><span>${k}</span></div>`).join("");
+  $("scanBody").innerHTML = out.rows.map(r => {
+    if (r.error) return `<tr><td><b>${esc(r.symbol)}</b></td><td colspan="9" class="muted">${esc(r.error)}</td></tr>`;
+    const pos = r.position > 0 ? '<span class="up">持多</span>' : r.position < 0 ? '<span class="down">持空</span>' : '<span class="muted">空仓</span>';
+    const pend = r.pending.map(p => { const [a, c] = ACTION[p.action]; return `<b class="${c}">${a}</b>${p.stop ? ` <span class="muted">止损 ${fmt(p.stop)}</span>` : ""}`; }).join(" → ") || '<span class="muted">—</span>';
+    return `<tr class="click" data-s="${esc(r.symbol)}"><td><b>${esc(r.symbol)}</b></td><td>${pos}${r.unrealized_pct != null ? " " + pctHtml(r.unrealized_pct) : ""}</td>
+      <td>${pend}</td><td class="num">${fmt(r.close)}</td><td class="num">${pctHtml(r.change_pct)}</td>
+      <td class="num">${pctHtml(r.total_return_pct)}</td><td class="num">${pctHtml(r.buy_hold_pct)}</td>
+      <td class="num down">${fmt(r.max_drawdown_pct)}%</td><td class="num">${r.win_rate_pct == null ? "—" : fmt(r.win_rate_pct, 1) + "%"}</td><td class="num">${r.trades}</td></tr>`;
+  }).join("");
+  $("scanBody").querySelectorAll("tr.click").forEach(tr => tr.onclick = async () => { setSymbol(tr.dataset.s); await runBacktest(); });
+}
+
+// ---------------------------------------------------------------- alerts
+const ALERT_TYPES = {
+  cross_up: v => `crossover(close, ${v})`, cross_down: v => `crossunder(close, ${v})`,
+  above: v => `close > ${v}`, below: v => `close < ${v}`,
+  rsi_below: v => `rsi(close, 14) < ${v}`, rsi_above: v => `rsi(close, 14) > ${v}`,
+  pct_up: v => `change(close, 1) > ${v}`, pct_down: v => `change(close, 1) < -${v}`,
+  vol_spike: v => `volume > sma(volume, 20) * ${v}`,
+};
+const PRICE_TYPES = ["cross_up", "cross_down", "above", "below"];
+$("aType").onchange = () => {
+  const custom = $("aType").value === "custom";
+  $("aCustomRow").hidden = !custom; $("aValueRow").hidden = custom;
+  if (PRICE_TYPES.includes($("aType").value) && lastData) $("aValue").value = lastData.last.price;
+  if ($("aType").value.startsWith("rsi")) $("aValue").value = $("aType").value === "rsi_below" ? 30 : 70;
+};
+$("aSave").onclick = async () => {
+  const t = $("aType").value, v = $("aValue").value;
+  if (t !== "custom" && (v === "" || Number.isNaN(Number(v)))) { $("aMsg").innerHTML = '<div class="errors">请填写数值</div>'; return; }
+  const body = { symbol: $("aSym").value, interval: $("aInterval").value, mode: $("aMode").value, note: $("aNote").value,
+                 condition: t === "custom" ? $("aCustom").value : ALERT_TYPES[t](Number(v)),
+                 level: PRICE_TYPES.includes(t) ? Number(v) : null };
+  try {
+    await api("/api/alerts", { method: "POST", body: JSON.stringify(body) });
+    $("aMsg").innerHTML = '<div class="ok">已添加</div>'; $("aNote").value = "";
+    loadAlerts(); drawAlertLines();
+  } catch (e) { $("aMsg").innerHTML = `<div class="errors">${esc(e.message)}</div>`; }
+};
+async function loadAlerts() {
+  let list = [];
+  try { list = await api("/api/alerts"); } catch (e) {}
+  $("alertList").innerHTML = list.map(a => `<div class="strat-item">
+      <div class="row" style="margin:0"><b style="flex:0 0 auto">${esc(a.symbol)}</b><span class="badge" style="flex:0 0 auto">${esc(a.interval)}</span>
+        <span style="flex:1">${a.active ? '<span class="up">生效中</span>' : '<span class="muted">已关闭</span>'}</span>
+        <button class="danger" style="flex:0 0 auto" data-adel="${a.id}" aria-label="删除提醒">删除</button></div>
+      <div><code>${esc(a.condition)}</code></div>
+      <div class="meta">${a.mode === "once" ? "只提醒一次" : "每根 K 线"}${a.note ? " · " + esc(a.note) : ""}${a.last_triggered ? " · 上次触发 " + esc(new Date(a.last_triggered).toLocaleString()) : ""}</div>
+    </div>`).join("") || '<div class="muted">还没有提醒</div>';
+  $("alertList").querySelectorAll("[data-adel]").forEach(b => b.onclick = async () => {
+    try { await api(`/api/alerts/${b.dataset.adel}`, { method: "DELETE" }); } catch (e) { alert(e.message); }
+    loadAlerts(); drawAlertLines();
+  });
+}
+$("aRun").onclick = async () => {
+  $("aRun").disabled = true;
+  try { const r = await api("/api/alerts/run", { method: "POST" }); $("aMsg").innerHTML = `<div class="ok">检查完成，触发 ${r.fired.length} 个</div>`; } catch (e) { alert(e.message); }
+  $("aRun").disabled = false; loadAlerts(); drawAlertLines();
+};
 
 // ---------------------------------------------------------------- signals
 async function loadSignals() {

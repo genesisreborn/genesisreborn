@@ -175,6 +175,9 @@ class BarStore:
         symbol = symbol.upper()
         bar_length(interval)
         incremental = self.last_ts(symbol, interval) is not None
+        import time
+
+        self._last_pull[(symbol, interval)] = time.monotonic()
         try:
             df = self._fetch(symbol, interval, incremental)
         except Exception as exc:  # noqa: BLE001 - network providers fail in many ways

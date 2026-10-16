@@ -18,6 +18,7 @@ from .config import Settings
 from .db import Database
 from .pipeline import run_cycle
 from .report import generate_report
+from .strategy.alerts import AlertEngine
 from .strategy.signals import SignalEngine
 from .telegram_bot import TelegramNotifier
 
@@ -32,6 +33,7 @@ class Engine:
         self.db = Database(settings.db_path)
         self.notifier = TelegramNotifier(settings, self.db)
         self.signals = SignalEngine(self.db, settings)
+        self.alerts = AlertEngine(self.db, self.signals.store)
         self.scheduler = BackgroundScheduler(timezone=settings.timezone)
 
     def refresh(self) -> dict:
@@ -68,12 +70,21 @@ class Engine:
                     self.notifier.send_signal(sig)
         return new
 
+    def run_alerts(self) -> list[dict]:
+        fired = self.alerts.run()
+        if self.settings.telegram_enabled:
+            for a in fired:
+                self.notifier.send_alert(a)
+        return fired
+
     def _scheduled_signals(self) -> None:
         try:
             for sym in self.db.get_watchlist(self.settings.watchlist):  # keep watchlist quotes fresh
-                self.signals.store.update(sym, "1d")
+                self.signals.store.maybe_update(sym, "1d", min_gap_s=60)
             if self.db.list_strategies(enabled_only=True):
                 self.run_signals()
+            if self.db.list_alerts(active_only=True):
+                self.run_alerts()
         except Exception:  # noqa: BLE001 - keep the scheduler alive
             log.exception("signal run failed")
 

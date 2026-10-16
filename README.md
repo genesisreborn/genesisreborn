@@ -54,7 +54,17 @@
 - 新信号写入数据库（同一根 K 线不会重复）、显示在「信号」页、推送到 Telegram（含收盘价、参考止损/止盈）。Telegram 里发 `/signals` 查看最近信号。
 - 「信号」页还列出每个策略 × 代码当前的模拟持仓、开仓价、浮盈和止损位。
 
-> 系统只给信号，不会自动下单。
+**策略扫描器**
+- 在「策略」页点“扫描：谁现在有信号”，用当前编辑的策略扫一遍自选股和热门雷达里的股票（最多 60 个）。
+- 结果按“下一根 K 线要开仓的 → 持仓中的 → 回测收益”排序；每行有当前状态、待执行信号和参考止损、回测收益/买入持有/最大回撤/胜率。
+- 顶部汇总：多少代码盈利、多少跑赢买入持有、回撤中位数。只在一两只股票上赚钱的策略，在这里一眼就能看出来。
+
+**条件提醒（类似 TradingView Alert）**
+- 「提醒」页：价格上穿/下穿、收盘高于/低于、RSI 高于/低于、单根涨跌幅、成交量放大，或用规则语法写任意条件。
+- 可选“只提醒一次”（触发后自动关闭）或“每根 K 线都提醒”。价格类提醒在图表上画虚线。
+- 与策略信号一起每 `SIGNAL_REFRESH_MINUTES` 检查一次，按 K 线收盘判断；触发后推送 Telegram，`/alerts` 查看生效中的提醒。
+
+> 系统只给信号和提醒，不会自动下单。
 
 ## 工作原理（热门雷达）
 
@@ -182,6 +192,8 @@ cp .env.example .env && docker compose up -d --build
 | `POST /api/backtest` | 回测：`{"strategy": {...} 或 "strategy_id": 1, "symbol": "AAPL", "interval": "1d"}` |
 | `GET /api/signals`、`GET /api/positions`、`POST /api/signals/run` | 信号列表 / 模拟持仓 / 立即检查 |
 | `GET/PUT /api/watchlist` | 自选列表 |
+| `POST /api/scan` | 策略扫描：`{"strategy": {...}, "universe": "both"/"watchlist"/"hot"}` 或指定 `"symbols"` |
+| `GET/POST /api/alerts`、`DELETE /api/alerts/{id}`、`POST /api/alerts/run` | 条件提醒 |
 
 设置 `API_TOKEN` 后，所有写操作（生成报告、保存/删除策略、修改自选、立即检查）都要带 `Authorization: Bearer <token>`；网页第一次遇到时会提示输入并记住。
 
@@ -208,7 +220,8 @@ stockpulse/
   report.py         报告生成（调用 Claude 一次）、冷却、Markdown 输出
   market_data.py    K 线数据（Yahoo / Massive）、缓存、判断 K 线是否收盘
   indicators.py     技术指标
-  strategy/         策略：dsl.py 规则语言、presets.py 模板、backtest.py 回测、signals.py 实时信号
+  strategy/         策略：dsl.py 规则语言、presets.py 模板、backtest.py 回测、signals.py 实时信号、
+                    scanner.py 多代码扫描、alerts.py 条件提醒
   telegram_bot.py   推送与机器人命令
   scheduler.py      定时任务
   web/              FastAPI；static/index.html 热门雷达，static/chart.html 图表策略页，trading.py 图表/策略 API

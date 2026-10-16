@@ -14,6 +14,8 @@ from ..strategy import StrategyConfig
 from ..strategy.backtest import run_backtest
 from ..strategy.dsl import FUNCTION_NAMES, SERIES_NAMES, DSLError
 from ..strategy.presets import PRESETS
+from ..strategy.alerts import Alert
+from ..strategy.scanner import MAX_SYMBOLS, scan
 from ..strategy.signals import SignalEngine
 
 MAX_BARS = 5000
@@ -225,6 +227,60 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
             raise HTTPException(400, {"errors": [str(exc)]}) from exc
         return {"symbol": symbol, "interval": cfg.interval, "costs_bps": {"commission": settings.commission_bps,
                 "slippage": settings.slippage_bps}, **res.to_dict()}
+
+    @r.post("/scan")
+    def scan_symbols(body: dict[str, Any] = Body(...)):
+        """Body: {strategy: {...} | strategy_id, symbols?: [...], universe?: "watchlist"|"hot"|"both", interval?}"""
+        if body.get("strategy_id"):
+            raw = db.get_strategy(int(body["strategy_id"]))
+            if not raw:
+                raise HTTPException(404, "策略不存在")
+        else:
+            raw = body.get("strategy") or {}
+        if body.get("interval"):
+            raw = {**raw, "interval": body["interval"]}
+        cfg = parse_cfg(raw)
+        symbols = [s.strip().upper() for s in body.get("symbols") or [] if s and s.strip()]
+        if not symbols:
+            universe = body.get("universe") or "both"
+            if universe in ("watchlist", "both"):
+                symbols += db.get_watchlist(settings.watchlist)
+            if universe in ("hot", "both"):
+                snap = db.latest_snapshot() or {}
+                symbols += [r["ticker"] for r in snap.get("ranking", [])]
+            symbols += cfg.symbols
+        if not symbols:
+            raise HTTPException(400, "没有可扫描的代码")
+        return scan(store, cfg, symbols[:MAX_SYMBOLS], settings.commission_bps, settings.slippage_bps)
+
+    # ---------------------------------------------------------------- alerts
+    @r.get("/alerts")
+    def list_alerts(symbol: str | None = None):
+        return db.list_alerts(symbol=symbol.upper() if symbol else None)
+
+    @r.post("/alerts")
+    def save_alert(body: dict[str, Any] = Body(...), _=require_token):
+        try:
+            a = Alert.from_dict(body)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, {"errors": [str(exc)]}) from exc
+        errors = a.validate()
+        if errors:
+            raise HTTPException(400, {"errors": errors})
+        if a.id is None:
+            a.last_bar_ts = a.last_triggered = None
+        a.id = db.save_alert(a.to_dict())
+        return next(x for x in db.list_alerts() if x["id"] == a.id)
+
+    @r.delete("/alerts/{alert_id}")
+    def delete_alert(alert_id: int, _=require_token):
+        if not db.delete_alert(alert_id):
+            raise HTTPException(404, "提醒不存在")
+        return {"deleted": alert_id}
+
+    @r.post("/alerts/run")
+    def run_alerts(_=require_token):
+        return {"fired": engine.run_alerts()}
 
     # ---------------------------------------------------------------- signals
     @r.get("/signals")

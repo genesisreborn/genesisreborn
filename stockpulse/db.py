@@ -75,6 +75,13 @@ CREATE TABLE IF NOT EXISTS signals (
 );
 CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created);
 
+CREATE TABLE IF NOT EXISTS alerts_cfg (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    config      TEXT NOT NULL,             -- JSON Alert
+    active      INTEGER NOT NULL DEFAULT 1,
+    created     TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS subscribers (
     chat_id     TEXT PRIMARY KEY,
     created     TEXT NOT NULL
@@ -287,6 +294,52 @@ class Database:
         else:
             rows = self.query("SELECT * FROM signals ORDER BY created DESC, id DESC LIMIT ?", (limit,))
         return [dict(r) for r in rows]
+
+    # ---- price / condition alerts ----
+    def save_alert(self, cfg: dict) -> int:
+        with self.tx() as c:
+            if cfg.get("id"):
+                cur = c.execute("UPDATE alerts_cfg SET config=?, active=? WHERE id=?",
+                                (json.dumps(cfg, ensure_ascii=False), int(bool(cfg.get("active", True))), cfg["id"]))
+                if cur.rowcount:
+                    return int(cfg["id"])
+            cur = c.execute("INSERT INTO alerts_cfg(config, active, created) VALUES (?,?,?)",
+                            ("{}", int(bool(cfg.get("active", True))), iso(utcnow())))
+            new_id = int(cur.lastrowid)
+            c.execute("UPDATE alerts_cfg SET config=? WHERE id=?", (json.dumps({**cfg, "id": new_id}, ensure_ascii=False), new_id))
+            return new_id
+
+    def list_alerts(self, active_only: bool = False, symbol: str | None = None) -> list[dict]:
+        sql, params = "SELECT config, active FROM alerts_cfg", []
+        conds = []
+        if active_only:
+            conds.append("active=1")
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        out = []
+        for r in self.query(sql + " ORDER BY id DESC", params):
+            d = {**json.loads(r["config"]), "active": bool(r["active"])}
+            if symbol is None or d.get("symbol") == symbol:
+                out.append(d)
+        return out
+
+    def mark_alert(self, alert_id: int, bar_ts: int, triggered: bool, deactivate: bool) -> None:
+        rows = self.query("SELECT config FROM alerts_cfg WHERE id=?", (alert_id,))
+        if not rows:
+            return
+        cfg = json.loads(rows[0]["config"])
+        cfg["last_bar_ts"] = bar_ts
+        if triggered:
+            cfg["last_triggered"] = iso(utcnow())
+        if deactivate:
+            cfg["active"] = False
+        with self.tx() as c:
+            c.execute("UPDATE alerts_cfg SET config=?, active=? WHERE id=?",
+                      (json.dumps(cfg, ensure_ascii=False), 0 if deactivate else int(bool(cfg.get("active", True))), alert_id))
+
+    def delete_alert(self, alert_id: int) -> bool:
+        with self.tx() as c:
+            return c.execute("DELETE FROM alerts_cfg WHERE id=?", (alert_id,)).rowcount > 0
 
     # ---- watchlist (chart page) ----
     def get_watchlist(self, default: list[str]) -> list[str]:

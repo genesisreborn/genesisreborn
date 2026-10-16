@@ -297,3 +297,59 @@ def test_engine_pushes_new_signals_to_telegram(tmp_path):
     msg = format_signal({"action": "BUY", "symbol": "NVDA", "interval": "1d", "strategy": "x<y>", "reason": "signal",
                          "bar_ts": 1760500800, "price": 101.5, "stop": 96.4})
     assert "买入做多" in msg and "x&lt;y&gt;" in msg and "参考止损 96.4" in msg and "2025-10-15" in msg
+
+
+# ---------------------------------------------------------------- scanner & alerts
+def test_scanner_ranks_entry_signals_first(tmp_path):
+    from stockpulse.strategy.scanner import scan
+
+    s = settings(tmp_path)
+    store = BarStore(Database(s.db_path), s)
+    cfg = preset("supertrend")
+    out = scan(store, cfg, ["aapl", "AAPL", "NVDA", "TSLA", "MSFT"])
+    assert out["summary"]["symbols"] == 4 and out["summary"]["ok"] == 4
+    rows = out["rows"]
+    assert {r["symbol"] for r in rows} == {"AAPL", "NVDA", "TSLA", "MSFT"}
+    has_entry = [any(p["action"] in ("BUY", "SHORT") for p in r["pending"]) for r in rows]
+    assert has_entry == sorted(has_entry, reverse=True)
+    assert 0 <= out["summary"]["beat_buy_hold_pct"] <= 100
+
+
+def test_alert_fires_once_and_deactivates(tmp_path):
+    from stockpulse.strategy.alerts import Alert, AlertEngine
+
+    s = settings(tmp_path)
+    db = Database(s.db_path)
+    store = BarStore(db, s)
+    eng = AlertEngine(db, store)
+    now = datetime.now(timezone.utc) + timedelta(days=2)
+    once = Alert(symbol="AAPL", condition="close > 0", interval="1d", note="test")
+    never = Alert(symbol="AAPL", condition="close < 0", interval="1d", mode="every_bar")
+    assert once.validate() == [] and Alert(symbol="??", condition="x >").validate()
+    db.save_alert(once.to_dict())
+    db.save_alert(never.to_dict())
+    fired = eng.run(now=now)
+    assert [f["condition"] for f in fired] == ["close > 0"] and fired[0]["close"] > 0
+    assert eng.run(now=now) == []                         # deactivated
+    assert len(db.list_alerts(active_only=True)) == 1      # the every_bar one stays
+    assert db.list_alerts(active_only=True)[0]["last_bar_ts"]
+
+
+def test_scan_and_alert_api(tmp_path):
+    from stockpulse.web.app import create_app
+
+    s = settings(tmp_path)
+    app = create_app(s, start_scheduler=False)
+    with TestClient(app) as c:
+        r = c.post("/api/scan", json={"strategy": preset("ema_cross").to_dict(), "symbols": ["AAPL", "NVDA"]})
+        assert r.status_code == 200 and r.json()["summary"]["ok"] == 2
+        assert c.post("/api/scan", json={"strategy": preset("ema_cross").to_dict(), "universe": "watchlist"}).json()["summary"]["symbols"] == 5
+
+        bad = c.post("/api/alerts", json={"symbol": "AAPL", "condition": "close >", "interval": "1d"})
+        assert bad.status_code == 400
+        a = c.post("/api/alerts", json={"symbol": "aapl", "condition": "crossover(close, 100)", "level": 100}).json()
+        assert a["id"] and a["symbol"] == "AAPL" and a["active"] and a["level"] == 100
+        assert c.get("/api/alerts", params={"symbol": "AAPL"}).json()[0]["id"] == a["id"]
+        assert "fired" in c.post("/api/alerts/run").json()
+        assert c.delete(f"/api/alerts/{a['id']}").status_code == 200
+        assert c.get("/api/alerts").json() == []

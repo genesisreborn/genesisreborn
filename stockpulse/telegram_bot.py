@@ -102,6 +102,18 @@ def format_signal(sig: dict) -> str:
     return "\n".join(lines)
 
 
+def format_alert(a: dict) -> str:
+    from .strategy.signals import bar_time_str
+
+    lines = [f"🔔 <b>提醒触发 · {_e(a['symbol'])}</b>（{_e(a['interval'])}）",
+             f"条件：<code>{_e(a['condition'])}</code>",
+             f"收盘价 {a['close']} · K 线 {_e(bar_time_str(a['bar_ts'], a['interval']))}"]
+    if a.get("note"):
+        lines.append(f"备注：{_e(a['note'])}")
+    lines.append("（一次性提醒，已自动关闭）" if a.get("mode") == "once" else "（每根 K 线满足条件都会提醒）")
+    return "\n".join(lines)
+
+
 class TelegramNotifier:
     def __init__(self, settings: Settings, db: Database, client: httpx.Client | None = None):
         self.settings = settings
@@ -142,6 +154,9 @@ class TelegramNotifier:
         return self.broadcast(format_report(snap, title=REPORT_TITLE if snap.get("report_id") else
                                             "📈 StockPulse 热门股简报"))
 
+    def send_alert(self, alert: dict) -> int:
+        return self.broadcast(format_alert(alert))
+
     def send_signal(self, sig: dict) -> int:
         return self.broadcast(format_signal(sig))
 
@@ -165,7 +180,7 @@ class TelegramNotifier:
         if cmd in ("/start", "/subscribe"):
             self.db.add_subscriber(chat_id)
             return ("✅ 已订阅 StockPulse！你会收到每日热门股简报和盘中异动提醒。\n\n"
-                    "/report 最新 AI 报告\n/signals 最近交易信号\n/top 实时热门榜\n/stock TSLA 查看个股\n/stop 取消订阅")
+                    "/report 最新 AI 报告\n/signals 最近交易信号\n/alerts 生效中的提醒\n/top 实时热门榜\n/stock TSLA 查看个股\n/stop 取消订阅")
         if cmd in ("/stop", "/unsubscribe"):
             self.db.remove_subscriber(chat_id)
             return "已取消订阅。发送 /start 可重新订阅。"
@@ -180,6 +195,12 @@ class TelegramNotifier:
                 return "还没有交易信号。在网页的「策略」页启用策略后，新信号会自动推送。"
             return "<b>最近的策略信号</b>\n" + "\n".join(
                 f"• {_e(describe_signal(s))} · {_e(s['strategy'])} · {_e(s['interval'])}" for s in sigs)
+        if cmd == "/alerts":
+            items = self.db.list_alerts(active_only=True)
+            if not items:
+                return "没有生效中的提醒。在图表页「提醒」里添加。"
+            return "<b>生效中的提醒</b>\n" + "\n".join(
+                f"• {_e(a['symbol'])} {_e(a['interval'])}：<code>{_e(a['condition'])}</code>" for a in items[:20])
         if cmd == "/top":
             return format_report(snap) if snap else "数据还在生成中，请稍后再试。"
         if cmd == "/stock":
@@ -190,7 +211,7 @@ class TelegramNotifier:
                 if r["ticker"] == t:
                     return format_stock_detail(r)
             return f"{_e(t)} 目前不在热门榜/关注列表中。"
-        return "可用命令：/start /report /signals /top /stock TICKER /stop"
+        return "可用命令：/start /report /signals /alerts /top /stock TICKER /stop"
 
     def poll_forever(self) -> None:
         if not self.settings.telegram_enabled:
