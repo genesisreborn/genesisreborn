@@ -25,6 +25,7 @@ async function state(env, chatId) {
       nextPayment: s.next?.payment ?? 0, nextDue: due && ymd(due), daysUntil: due && daysBetween(t, due),
       totalInterest: s.totalInterest, paidInterest: s.paidInterest, remainingInterest: s.remainingInterest,
       remainingPrincipal: s.remainingPrincipal, remainingTotal: s.remainingPayments,
+      curve: rows.map((r) => [r.principal, r.interest]),
       schedule: rows.slice(l.paid_count, l.paid_count + 12).map((r) => ({ ...r, due: ymd(dueDate(l.start_ym, l.due_day, r.n)) })),
     };
   });
@@ -35,6 +36,16 @@ async function state(env, chatId) {
   const todayRow = await env.DB.prepare('SELECT COALESCE(SUM(amount_cents),0) s FROM expenses WHERE chat_id=? AND spent_on=?').bind(chatId, today).first();
   const { results: recent } = await env.DB.prepare(
     'SELECT id, amount_cents, category, note, spent_on FROM expenses WHERE chat_id=? ORDER BY id DESC LIMIT 15').bind(chatId).all();
+  const from14 = new Date(Date.UTC(t.y, t.m - 1, t.d - 13));
+  const { results: dayRows } = await env.DB.prepare(
+    'SELECT spent_on, SUM(amount_cents) s FROM expenses WHERE chat_id=? AND spent_on>=? GROUP BY spent_on')
+    .bind(chatId, ymd({ y: from14.getUTCFullYear(), m: from14.getUTCMonth() + 1, d: from14.getUTCDate() })).all();
+  const byDay = Object.fromEntries(dayRows.map((r) => [r.spent_on, r.s]));
+  const daily = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date(Date.UTC(t.y, t.m - 1, t.d - 13 + i));
+    const key = ymd({ y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate() });
+    return { date: key, cents: byDay[key] ?? 0 };
+  });
   const set = await env.DB.prepare('SELECT monthly_budget_cents b FROM settings WHERE chat_id=?').bind(chatId).first();
   return {
     currency: env.CURRENCY ?? '$', today,
@@ -44,7 +55,7 @@ async function state(env, chatId) {
       remaining: out.reduce((a, l) => a + l.remainingTotal, 0),
       remainingInterest: out.reduce((a, l) => a + l.remainingInterest, 0),
     },
-    spend: { today: todayRow.s, month: cats.reduce((a, c) => a + c.s, 0), categories: cats, recent, budget: set?.b ?? null },
+    spend: { daily, today: todayRow.s, month: cats.reduce((a, c) => a + c.s, 0), categories: cats, recent, budget: set?.b ?? null },
   };
 }
 

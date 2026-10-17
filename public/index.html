@@ -7,111 +7,346 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Installments">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0e7490">
+<meta name="theme-color" content="#184f95">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icon.png">
 <title>Installments</title>
 <style>
-:root{--bg:#f3f5f8;--card:#fff;--ink:#0f172a;--mute:#64748b;--line:#e2e8f0;--brand:#0e7490;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--int:#f59e0b}
-@media(prefers-color-scheme:dark){:root{--bg:#0b1220;--card:#131c2e;--ink:#e6edf7;--mute:#8da0ba;--line:#22304a;--brand:#22b8d6}}
+:root{
+  color-scheme:light;
+  --bg:#f1f1ee;--card:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--ink3:#8b8a85;--line:#e7e6e1;--track:#e9e8e3;
+  --s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--s7:#6250d6;--s8:#e34948;
+  --good:#0ca30c;--warn:#fab219;--crit:#d03b3b;--brand:#2a78d6;--shadow:0 1px 2px rgba(20,20,10,.05),0 8px 24px rgba(20,20,10,.06)
+}
+@media(prefers-color-scheme:dark){:root{
+  color-scheme:dark;
+  --bg:#0f0f0e;--card:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--ink3:#8d8c85;--line:#2b2b29;--track:#2b2b29;
+  --s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;--s7:#9085e9;--s8:#e66767;--brand:#3987e5;--shadow:none}}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top) 0 calc(76px + env(safe-area-inset-bottom))}
-header{padding:18px 16px 8px}h1{margin:0;font-size:28px}.sub{color:var(--mute);font-size:14px}
-main{padding:0 16px 70px}.card{background:var(--card);border-radius:16px;padding:14px 16px;margin:12px 0;box-shadow:0 1px 2px rgba(0,0,0,.06)}
-.row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}.big{font-size:24px;font-weight:700;white-space:nowrap}.nw{white-space:nowrap}.mute{color:var(--mute);font-size:13px}
-.bar{height:10px;border-radius:6px;background:var(--line);overflow:hidden;margin:10px 0 6px;display:flex}.bar i{display:block;height:100%}
-.pill{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--line)}.late{background:var(--bad);color:#fff}.soon{background:var(--warn);color:#fff}
-button{font:inherit;border:0;border-radius:12px;padding:10px 14px;background:var(--brand);color:#fff;font-weight:600}
-button.ghost{background:var(--line);color:var(--ink)}button.danger{background:transparent;color:var(--bad)}
-.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
-.tabs button{flex:1;background:none;color:var(--mute);border-radius:0;padding:12px}.tabs button.on{color:var(--brand)}
-.fab{position:fixed;right:16px;bottom:calc(72px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:28px;font-size:30px;padding:0;box-shadow:0 4px 12px rgba(0,0,0,.3)}
-input,select{font:inherit;width:100%;padding:11px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);margin:4px 0 10px}
-label{font-size:13px;color:var(--mute)}.sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;z-index:5}
-.sheet>div{background:var(--card);width:100%;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}
-table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}td,th{padding:5px 3px;text-align:right}th:first-child,td:first-child{text-align:left}th{color:var(--mute);font-weight:500}
-.cat{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:14px}.cat b{flex:0 0 90px;font-weight:500;overflow:hidden;text-overflow:ellipsis}.cat .bar{flex:1;margin:0;height:8px}
-.err{color:var(--bad);font-size:14px;min-height:20px}.hidden{display:none}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  padding:0 0 calc(92px + env(safe-area-inset-bottom));-webkit-font-smoothing:antialiased}
+.hidden{display:none!important}
+h1,h2,h3{margin:0}
+.wrap{padding:0 16px;max-width:640px;margin:0 auto}
+.num{font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.mute{color:var(--ink2);font-size:13px}.tiny{color:var(--ink3);font-size:12px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.nw{white-space:nowrap}
+
+/* hero */
+.hero{background:linear-gradient(145deg,#0d366b 0%,#184f95 45%,#2a78d6 100%);color:#fff;
+  padding:calc(22px + env(safe-area-inset-top)) 0 74px;border-radius:0 0 28px 28px}
+.hero .wrap{display:flex;flex-direction:column;gap:6px}
+.hero .eyebrow{font-size:13px;opacity:.8;font-weight:500;letter-spacing:.02em}
+.hero .title{font-size:34px;font-weight:700;letter-spacing:-.03em}
+.hero .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.chip{background:rgba(255,255,255,.16);backdrop-filter:blur(6px);border-radius:99px;padding:5px 11px;font-size:13px;font-weight:500}
+.lift{margin-top:-56px;position:relative}
+
+.card{background:var(--card);border-radius:20px;padding:16px;margin:12px 0;box-shadow:var(--shadow)}
+.card h3{font-size:15px;font-weight:650;letter-spacing:-.01em}
+.sec{margin:22px 4px 6px;font-size:13px;font-weight:600;color:var(--ink2);text-transform:uppercase;letter-spacing:.06em}
+
+/* stat grid */
+.stats{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}.stats .stat .v{font-size:18px}.stats .card{padding:12px 14px}
+.stat .k{font-size:12px;color:var(--ink2);font-weight:500}.stat .v{font-size:21px;font-weight:700;margin-top:2px;white-space:nowrap}
+.stat .d{font-size:12px;color:var(--ink3);margin-top:2px}
+
+/* split bar & legend */
+.split{display:flex;height:12px;border-radius:7px;overflow:hidden;gap:2px;background:var(--track)}
+.split i{display:block;height:100%}.split i:first-child{border-radius:7px 0 0 7px}.split i:last-child{border-radius:0 7px 7px 0}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:13px;color:var(--ink2)}
+.legend .dot,.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:baseline}
+
+/* upcoming */
+.up{display:flex;gap:12px;overflow-x:auto;margin:0 -16px;padding:4px 16px 8px;scroll-snap-type:x mandatory;scrollbar-width:none}
+.up::-webkit-scrollbar{display:none}
+.upc{scroll-snap-align:start;flex:0 0 150px;background:var(--card);border-radius:18px;padding:14px;box-shadow:var(--shadow)}
+.upc .date{font-size:12px;color:var(--ink2);font-weight:500}.upc .amt{font-size:19px;font-weight:700;margin:6px 0 2px}
+.upc .nm{font-size:13px;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;border-radius:99px;padding:3px 9px;background:var(--track);color:var(--ink2)}
+.badge.late{background:color-mix(in srgb,var(--crit) 16%,transparent);color:var(--crit)}
+.badge.soon{background:color-mix(in srgb,var(--warn) 28%,transparent);color:#8a5a00}
+.badge.ok{background:color-mix(in srgb,var(--good) 16%,transparent);color:#067006}
+@media(prefers-color-scheme:dark){.badge.soon{color:#fab219}.badge.ok{color:#4ccf4c}.badge.late{color:#f08585}}
+
+/* loan card */
+.loan{display:flex;gap:14px;align-items:center}
+.ring{flex:0 0 74px;position:relative;width:74px;height:74px}
+.ring svg{display:block}.ring b{position:absolute;inset:0;display:grid;place-items:center;font-size:16px;font-weight:700}
+.loan .info{flex:1;min-width:0}
+.loan .nm{font-weight:650;font-size:17px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.loan .amt{font-size:21px;font-weight:700;margin:3px 0 4px}
+.actions{display:flex;gap:8px;margin-top:14px}
+button{font:inherit;border:0;border-radius:14px;padding:12px 16px;font-weight:600;cursor:pointer}
+.btn{background:var(--brand);color:#fff;flex:1}.btn:active{opacity:.85}
+.btn.ghost{background:var(--track);color:var(--ink);flex:0 0 auto}
+.btn.plain{background:none;color:var(--crit);flex:0 0 auto;padding:12px 6px}
+
+/* charts */
+.chart{width:100%;display:block;touch-action:manipulation}
+.chart text{fill:var(--ink3);font-size:10px}
+.readout{min-height:38px;font-size:13px;color:var(--ink2);margin-top:6px}
+.readout b{color:var(--ink)}
+.catrow{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:7px 0;font-size:14px}
+.catrow .sw{width:10px;height:10px;border-radius:3px}
+.catrow .pct{color:var(--ink3);font-size:12px;min-width:34px;text-align:right}
+.donutwrap{display:flex;gap:16px;align-items:center}
+.donutwrap .mid{position:relative;flex:0 0 150px;height:150px}.donutwrap .mid svg{display:block}
+.donutwrap .mid .c{position:absolute;inset:0;display:grid;place-items:center;text-align:center;pointer-events:none}
+.donutwrap .mid .c b{display:block;font-size:15px;white-space:nowrap}.donutwrap .mid .c span{font-size:11px;color:var(--ink3)}
+.recent .it{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.recent .it:first-of-type{border-top:0}
+.recent .cat{display:flex;align-items:center;gap:10px;min-width:0}
+.recent .cat span.n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.avatar{flex:0 0 32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:13px;font-weight:700;color:#fff}
+
+/* nav */
+.tabs{position:fixed;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom));display:flex;background:color-mix(in srgb,var(--card) 88%,transparent);
+  backdrop-filter:blur(16px) saturate(1.6);-webkit-backdrop-filter:blur(16px) saturate(1.6);border-radius:24px;box-shadow:0 8px 30px rgba(0,0,0,.18);padding:6px;max-width:616px;margin:0 auto;z-index:4;border:1px solid var(--line)}
+.tabs button{flex:1;background:none;color:var(--ink3);border-radius:18px;padding:9px 4px;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:2px}
+.tabs button svg{width:22px;height:22px}
+.tabs button.on{color:var(--brand);background:color-mix(in srgb,var(--brand) 12%,transparent)}
+.fab{position:fixed;right:max(20px,calc(50% - 300px));bottom:calc(92px + env(safe-area-inset-bottom));width:58px;height:58px;border-radius:50%;padding:0;background:var(--brand);color:#fff;box-shadow:0 8px 22px rgba(24,79,149,.5);z-index:4;font-size:30px;line-height:1}
+
+/* sheet & forms */
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;z-index:9;animation:fade .2s}
+.sheet>div{background:var(--card);width:100%;max-width:640px;border-radius:26px 26px 0 0;padding:10px 18px calc(22px + env(safe-area-inset-bottom));max-height:92vh;overflow:auto;animation:up .25s ease}
+.grab{width:40px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 14px}
+@keyframes fade{from{opacity:0}}@keyframes up{from{transform:translateY(40px);opacity:.6}}
+label{display:block;font-size:12px;color:var(--ink2);font-weight:600;margin:12px 0 4px}
+input,select{font:inherit;width:100%;padding:13px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+input:focus,select:focus{outline:2px solid var(--brand);outline-offset:0}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+td,th{padding:7px 3px;text-align:right}th:first-child,td:first-child{text-align:left}th{color:var(--ink3);font-weight:500;font-size:11px}
+tr+tr td{border-top:1px solid var(--line)}
+.empty{text-align:center;padding:30px 10px;color:var(--ink2)}
+.empty .big{font-size:44px}
+#login{min-height:100vh;display:grid;place-items:center;padding:20px}
+#login .box{width:100%;max-width:380px}
+.err{color:var(--crit);font-size:14px;min-height:20px;margin:8px 0}
+.toast{position:fixed;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);background:#111;color:#fff;padding:10px 16px;border-radius:99px;font-size:14px;z-index:20;box-shadow:0 6px 20px rgba(0,0,0,.3)}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
 </style>
 </head>
 <body>
-<div id="login" class="hidden"><main><header><h1>Installments</h1><div class="sub">Enter your passcode</div></header>
-<div class="card"><input id="pass" type="password" placeholder="Passcode" autocomplete="current-password"><div class="err" id="loginErr"></div><button onclick="login()" style="width:100%">Unlock</button></div></main></div>
+
+<div id="login" class="hidden">
+  <div class="box">
+    <div style="font-size:42px">💳</div>
+    <h1 style="font-size:32px;margin:6px 0 4px;letter-spacing:-.03em">Installments</h1>
+    <div class="mute" style="margin-bottom:18px">Enter your passcode to continue.</div>
+    <input id="pass" type="password" placeholder="Passcode" autocomplete="current-password">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%" onclick="login()">Unlock</button>
+  </div>
+</div>
 
 <div id="app" class="hidden">
-<header><h1 id="title"></h1><div class="sub" id="subtitle"></div></header>
-<main id="view"></main>
-<button class="fab" id="fab" onclick="openAdd()">+</button>
-<nav class="tabs"><button id="t-loans" onclick="tab('loans')">💳 Loans</button><button id="t-spend" onclick="tab('spend')">🧾 Spending</button><button onclick="logout()">🔒 Lock</button></nav>
+  <div class="hero"><div class="wrap">
+    <div class="eyebrow" id="eyebrow"></div>
+    <div class="title num" id="heroTitle"></div>
+    <div class="chips" id="heroChips"></div>
+  </div></div>
+  <div class="wrap lift" id="view"></div>
+  <button class="fab" id="fab" onclick="openAdd()" aria-label="Add">+</button>
+  <nav class="tabs">
+    <button id="t-loans" onclick="tab('loans')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M2.5 10h19M6 15h4"/></svg>Loans</button>
+    <button id="t-spend" onclick="tab('spend')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Spending</button>
+    <button onclick="logout()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 018 0v2.5"/></svg>Lock</button>
+  </nav>
 </div>
 <div id="sheet" class="sheet hidden" onclick="if(event.target===this)closeSheet()"><div id="sheetBody"></div></div>
 
 <script>
-var S=null,TAB='loans',KEY='inst_pass';
-function tok(){try{return localStorage.getItem(KEY)||''}catch(e){return ''}}
-function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-function $(id){return document.getElementById(id)}
-function m(c){return S.currency+(c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+'use strict';
+let S=null,TAB='loans',SEL=null;const KEY='inst_pass';
+const CATS=['var(--s1)','var(--s2)','var(--s3)','var(--s4)','var(--s5)','var(--s6)','var(--s7)','var(--s8)'];
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const tok=()=>{try{return localStorage.getItem(KEY)||''}catch(e){return ''}};
+const num=c=>(c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const m=c=>S.currency+num(c);
+const ax=c=>c>=1e5?(c/1e5).toFixed(c%1e5?1:0)+'k':String(Math.round(c/100));
+const mk=c=>Math.abs(c)>=1e8?S.currency+(c/1e8).toFixed(2)+'M':Math.abs(c)>=1e5?S.currency+(c/1e5).toFixed(c%1e5?1:0)+'k':m(c);
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const fmtDate=s=>{const [y,mo,d]=s.split('-');return `${+d} ${MONTHS[+mo-1]}`};
+const fmtDateY=s=>`${fmtDate(s)} ${s.slice(0,4)}`;
+
 async function call(path,body){
-  var r=await fetch(path,{method:body?'POST':'GET',headers:{authorization:'Bearer '+tok(),'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
+  const r=await fetch(path,{method:body?'POST':'GET',headers:{authorization:'Bearer '+tok(),'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
   if(r.status===401){logout();throw new Error('unauthorized')}
-  var j=await r.json();if(!r.ok&&!j.state)throw new Error(j.error||'error');return j}
+  const j=await r.json();if(!r.ok&&!j.state)throw new Error(j.error||'error');return j}
 async function login(){
   try{localStorage.setItem(KEY,$('pass').value)}catch(e){}
-  try{S=await call('/api/state');$('login').classList.add('hidden');start()}catch(e){$('loginErr').textContent='Wrong passcode or server not configured.'}}
+  try{S=await call('/api/state');start()}catch(e){$('loginErr').textContent='Wrong passcode or server not configured.'}}
 function logout(){try{localStorage.removeItem(KEY)}catch(e){}$('app').classList.add('hidden');$('login').classList.remove('hidden')}
-async function boot(){
-  if(!tok())return logout();
-  try{S=await call('/api/state');start()}catch(e){}}
+async function boot(){if(!tok())return logout();try{S=await call('/api/state');start()}catch(e){}}
 function start(){$('login').classList.add('hidden');$('app').classList.remove('hidden');render()}
-function tab(t){TAB=t;render()}
+function tab(t){TAB=t;window.scrollTo(0,0);render()}
+function toast(t){const d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2200)}
 async function act(path,body,confirmMsg){
   if(confirmMsg&&!confirm(confirmMsg))return;
-  try{var j=await call(path,body);if(j.state)S=j.state;if(!j.ok)alert(j.message);closeSheet();render()}catch(e){alert(e.message)}}
+  try{const j=await call(path,body);if(j.state)S=j.state;if(!j.ok)alert(j.message);else toast(j.message.split('\n')[0]);closeSheet();render()}catch(e){alert(e.message)}}
 
-function dueBadge(l){if(l.done)return'<span class="pill">Paid off</span>';var d=l.daysUntil;
-  if(d<0)return'<span class="pill late">Overdue '+(-d)+'d</span>';if(d<=3)return'<span class="pill soon">'+(d===0?'Due today':'Due in '+d+'d')+'</span>';return'<span class="pill">In '+d+' days</span>'}
+/* ---------- svg helpers ---------- */
+function ring(pct,size=74,stroke=9,color='var(--good)'){
+  const r=(size-stroke)/2,c=2*Math.PI*r,o=c*(1-Math.min(1,pct/100));
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--track)" stroke-width="${stroke}"/><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${o}" transform="rotate(-90 ${size/2} ${size/2})"/></svg>`}
+function donut(parts,size=150,stroke=24){
+  const total=parts.reduce((a,p)=>a+p.v,0)||1,r=(size-stroke)/2,c=2*Math.PI*r,gap=parts.length>1?3:0;let off=0,out='';
+  parts.forEach((p,i)=>{const len=Math.max(0,p.v/total*c-gap);out+=`<circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${p.color}" stroke-width="${stroke}" stroke-dasharray="${len} ${c-len}" stroke-dashoffset="${-off}" transform="rotate(-90 ${size/2} ${size/2})" data-i="${i}"/>`;off+=p.v/total*c});
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--track)" stroke-width="${stroke}"/>${out}</svg>`}
+
+/* stacked bars: rows = [[a,b],...] ; first `paidN` are muted */
+function stackChart(id,rows,paidN,labels){
+  const W=340,H=150,pl=34,pb=18,pt=6,n=rows.length;
+  const max=Math.max(...rows.map(r=>r[0]+r[1]))||1;
+  const bw=(W-pl)/n,w=Math.max(2,Math.min(18,bw-2));
+  let g='',ticks='';
+  [0,.5,1].forEach(f=>{const y=pt+(H-pt-pb)*(1-f);ticks+=`<line x1="${pl}" x2="${W}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${pl-4}" y="${y+3}" text-anchor="end">${ax(max*f)}</text>`});
+  rows.forEach((r,i)=>{
+    const x=pl+i*bw+(bw-w)/2,hh=H-pt-pb,h1=r[0]/max*hh,h2=r[1]/max*hh,base=H-pb,op=i<paidN?.38:1;
+    const rad=Math.min(4,w/2);
+    g+=`<g opacity="${op}"><rect x="${x}" y="${base-h1}" width="${w}" height="${Math.max(0,h1)}" fill="var(--s1)" rx="${h2>0?0:rad}"/>`;
+    if(h2>.5)g+=`<rect x="${x}" y="${base-h1-h2-2}" width="${w}" height="${h2}" fill="var(--s2)" rx="${rad}"/>`;
+    g+='</g>';
+    g+=`<rect x="${pl+i*bw}" y="0" width="${bw}" height="${H-pb}" fill="transparent" data-i="${i}"/>`});
+  const idx=[0,Math.floor(n/2),n-1].filter((v,i,a)=>a.indexOf(v)===i);
+  const xl=idx.map(i=>`<text x="${pl+i*bw+bw/2}" y="${H-4}" text-anchor="${i===0?'start':i===n-1?'end':'middle'}">${labels[i]}</text>`).join('');
+  return `<svg id="${id}" class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Principal and interest per payment">${ticks}${g}${xl}</svg>`}
+
+function bindChart(id,fn){
+  const svg=$(id);if(!svg)return;
+  const h=e=>{const t=e.target.closest('[data-i]');if(t)fn(+t.dataset.i)};
+  svg.addEventListener('click',h);svg.addEventListener('mousemove',h);}
+
+/* ---------- hero ---------- */
+function hero(){
+  const t=S.today.split('-'),mo=MONTHS[+t[1]-1]+' '+t[0];
+  $('eyebrow').textContent=TAB==='loans'?'Total still to pay':'Spent this month · '+mo;
+  if(TAB==='loans'){
+    $('heroTitle').textContent=m(S.totals.remaining);
+    const act=S.loans.filter(l=>!l.done);
+    $('heroChips').innerHTML=`<span class="chip">${m(S.totals.monthly)} / month</span><span class="chip">${m(S.totals.remainingInterest)} interest left</span><span class="chip">${act.length} active</span>`;
+  }else{
+    $('heroTitle').textContent=m(S.spend.month);
+    const b=S.spend.budget;
+    $('heroChips').innerHTML=`<span class="chip">Today ${m(S.spend.today)}</span>`+(b?`<span class="chip">${S.spend.month>b?'Over budget by '+m(S.spend.month-b):m(b-S.spend.month)+' left'}</span>`:'');
+  }}
+
+/* ---------- loans view ---------- */
+function dueBadge(l){
+  if(l.done)return '<span class="badge ok">✓ Paid off</span>';
+  const d=l.daysUntil;
+  if(d<0)return `<span class="badge late">⚠ Overdue ${-d}d</span>`;
+  if(d===0)return '<span class="badge soon">● Due today</span>';
+  if(d<=3)return `<span class="badge soon">● Due in ${d}d</span>`;
+  return `<span class="badge">In ${d} days</span>`}
+
 function loanCard(l){
-  var pct=Math.round(l.paid/l.months*100);
-  var pr=l.principal?Math.max(0,100-l.remainingPrincipal/l.principal*100):0;
-  var totalCost=l.principal+l.totalInterest;
-  return '<div class="card"><div class="row"><b>'+esc(l.name)+'</b>'+dueBadge(l)+'</div>'+
-  (l.done?'':'<div class="row" style="margin-top:6px"><span class="big">'+m(l.nextPayment)+'</span><span class="mute">due '+l.nextDue+'</span></div>')+
-  '<div class="bar"><i style="width:'+pct+'%;background:var(--ok)"></i></div>'+
-  '<div class="row mute"><span>'+l.paid+' of '+l.months+' paid ('+pct+'%)</span><span>'+m(l.remainingTotal)+' left</span></div>'+
-  '<div class="bar" title="cost breakdown"><i style="width:'+(l.principal/totalCost*100)+'%;background:var(--brand)"></i><i style="width:'+(l.totalInterest/totalCost*100)+'%;background:var(--int)"></i></div>'+
-  '<div class="row mute"><span class="nw"><span style="color:var(--brand)">●</span> Principal '+m(l.remainingPrincipal)+'</span><span class="nw"><span style="color:var(--int)">●</span> Interest '+m(l.remainingInterest)+'</span></div>'+
-  '<div class="row" style="margin-top:12px;gap:8px">'+(l.done?'':'<button onclick="act(\'/api/pay\',{id:'+l.id+'})" style="flex:1">✅ Mark paid</button>')+
-  '<button class="ghost" onclick="loanSheet('+l.id+')">Details</button></div></div>'}
+  const pct=Math.round(l.paid/l.months*100),total=l.remainingPrincipal+l.remainingInterest||1;
+  return `<div class="card"><div class="loan">
+    <div class="ring">${ring(pct,74,9,l.done?'var(--good)':'var(--s1)')}<b class="num">${pct}%</b></div>
+    <div class="info"><div class="row"><div class="nm">${esc(l.name)}</div>${dueBadge(l)}</div>
+      ${l.done?`<div class="amt num">${m(l.principal)}</div><div class="mute">Fully repaid 🎉</div>`:
+      `<div class="amt num">${m(l.nextPayment)}</div><div class="mute">due ${fmtDateY(l.nextDue)} · ${l.paid}/${l.months} paid</div>`}</div></div>
+    ${l.done?'':`<div style="margin-top:14px"><div class="split"><i style="width:${l.remainingPrincipal/total*100}%;background:var(--s1)"></i><i style="width:${l.remainingInterest/total*100}%;background:var(--s2)"></i></div>
+      <div class="legend"><span class="nw"><span class="dot" style="background:var(--s1)"></span>Principal ${m(l.remainingPrincipal)}</span><span class="nw"><span class="dot" style="background:var(--s2)"></span>Interest ${m(l.remainingInterest)}</span></div></div>`}
+    <div class="actions">${l.done?'':`<button class="btn" onclick="act('/api/pay',{id:${l.id}})">✓ Mark paid</button>`}<button class="btn ghost" onclick="loanSheet(${l.id})">Details</button></div></div>`}
 
+function upcoming(){
+  const a=S.loans.filter(l=>!l.done).sort((x,y)=>x.daysUntil-y.daysUntil);
+  if(!a.length)return '';
+  return `<div class="sec">Coming up</div><div class="up">${a.map(l=>`<div class="upc"><div class="date">${l.daysUntil<0?'<span style="color:var(--crit)">Overdue</span>':l.daysUntil===0?'Today':fmtDate(l.nextDue)}</div><div class="amt num">${m(l.nextPayment)}</div><div class="nm">${esc(l.name)}</div></div>`).join('')}</div>`}
+
+function loansView(){
+  if(!S.loans.length)return `<div class="card empty"><div class="big">💳</div><h3>No installments yet</h3><p class="mute">Tap + to add your first loan or instalment plan.</p></div>`;
+  const rp=S.loans.reduce((a,l)=>a+l.remainingPrincipal,0),ri=S.totals.remainingInterest;
+  const overview=`<div class="card"><div class="row"><h3>What you still owe</h3><span class="tiny">principal vs interest</span></div>
+    <div class="donutwrap" style="margin-top:12px"><div class="mid">${donut([{v:rp,color:'var(--s1)'},{v:ri,color:'var(--s2)'}])}<div class="c"><div><b class="num">${rp+ri?Math.round(ri/(rp+ri)*100):0}%</b><span>is interest</span></div></div></div>
+    <div style="flex:1;min-width:0"><div class="stat"><div class="k"><span class="dot" style="background:var(--s1)"></span>Principal</div><div class="v num">${m(rp)}</div></div>
+    <div class="stat" style="margin-top:12px"><div class="k"><span class="dot" style="background:var(--s2)"></span>Interest</div><div class="v num">${m(ri)}</div></div></div></div></div>`;
+  return overview+upcoming()+`<div class="sec">Your installments</div>`+S.loans.map(loanCard).join('')}
+
+/* ---------- spending view ---------- */
+function spendView(){
+  const sp=S.spend;let h='';
+  if(sp.budget){
+    const p=sp.month/sp.budget*100,over=sp.month>sp.budget,color=over?'var(--crit)':p>85?'var(--warn)':'var(--s1)';
+    const dim=new Date(+S.today.slice(0,4),+S.today.slice(5,7),0).getDate(),dleft=dim-(+S.today.slice(8))+1;
+    h+=`<div class="card"><div class="row"><h3>Monthly budget</h3><span class="mute num">${m(sp.budget)}</span></div>
+      <div class="split" style="margin:12px 0 8px"><i style="width:${Math.min(100,p)}%;background:${color}"></i></div>
+      <div class="row mute"><span>${Math.round(p)}% used</span><span>${over?'Over by '+m(sp.month-sp.budget):`≈ ${m(Math.floor((sp.budget-sp.month)/dleft))}/day for ${dleft} days`}</span></div></div>`}
+  /* last 14 days */
+  const mx=Math.max(1,...sp.daily.map(d=>d.cents)),W=340,H=120,bw=W/14;
+  const bars=sp.daily.map((d,i)=>{const hh=Math.max(d.cents?3:0,d.cents/mx*(H-26)),x=i*bw+4,last=i===13;
+    return `<rect x="${x}" y="${H-18-hh}" width="${bw-8}" height="${hh}" rx="4" fill="${last?'var(--s1)':'color-mix(in srgb,var(--s1) 45%,var(--track))'}"/><rect x="${i*bw}" y="0" width="${bw}" height="${H}" fill="transparent" data-i="${i}"/>`}).join('');
+  h+=`<div class="card"><div class="row"><h3>Last 14 days</h3><span class="tiny">tap a bar</span></div>
+    <svg id="dchart" class="chart" viewBox="0 0 ${W} ${H}" style="margin-top:8px" role="img" aria-label="Daily spending"><line x1="0" x2="${W}" y1="${H-18}" y2="${H-18}" stroke="var(--line)"/>${bars}<text x="0" y="${H-3}">${fmtDate(sp.daily[0].date)}</text><text x="${W}" y="${H-3}" text-anchor="end">Today</text></svg>
+    <div class="readout" id="dread">Average <b class="num">${m(Math.round(sp.daily.reduce((a,d)=>a+d.cents,0)/14))}</b> per day</div></div>`;
+  /* categories */
+  let cats=sp.categories.map(c=>({n:c.category,v:c.s}));
+  if(cats.length>8){const rest=cats.slice(7).reduce((a,c)=>a+c.v,0);cats=cats.slice(0,7).concat({n:'other',v:rest})}
+  cats.forEach((c,i)=>c.color=CATS[i]);
+  const tot=cats.reduce((a,c)=>a+c.v,0);
+  h+=`<div class="card"><h3>By category</h3>${cats.length?`<div class="donutwrap" style="margin-top:10px"><div class="mid">${donut(cats)}<div class="c"><div><b class="num">${mk(tot)}</b><span>this month</span></div></div></div>
+    <div style="flex:1;min-width:0" class="mute">Biggest: <b style="color:var(--ink)">${esc(cats[0].n)}</b><br>${Math.round(cats[0].v/tot*100)}% of spending</div></div>
+    <div style="margin-top:8px">${cats.map(c=>`<div class="catrow"><span class="sw" style="background:${c.color}"></span><span style="overflow:hidden;text-overflow:ellipsis">${esc(c.n)}</span><span class="num">${m(c.v)}</span><span class="pct">${Math.round(c.v/tot*100)}%</span></div>`).join('')}</div>`:'<p class="mute">Nothing logged this month. Tap + to add an expense.</p>'}</div>`;
+  /* recent */
+  h+=`<div class="card recent"><div class="row"><h3>Recent</h3><span style="display:flex;gap:6px"><button class="btn ghost" style="padding:7px 12px;font-size:13px" onclick="act('/api/undo',{})">Undo last</button><button class="btn ghost" style="padding:7px 12px;font-size:13px" onclick="budgetSheet()">Budget</button></span></div>
+    <div style="margin-top:6px">${sp.recent.map(e=>{const i=Math.max(0,sp.categories.findIndex(c=>c.category===e.category));return `<div class="it"><div class="cat"><span class="avatar" style="background:${CATS[Math.min(i,7)]}">${esc(e.category[0]||'?').toUpperCase()}</span><div style="min-width:0"><div class="n" style="font-weight:550">${esc(e.category)}</div><div class="tiny">${esc(e.note||'')} ${e.note?'· ':''}${fmtDate(e.spent_on)}</div></div></div><b class="num">${m(e.amount_cents)}</b></div>`}).join('')||'<p class="mute">No expenses yet.</p>'}</div></div>`;
+  return h}
+
+/* ---------- render ---------- */
 function render(){
   $('t-loans').className=TAB==='loans'?'on':'';$('t-spend').className=TAB==='spend'?'on':'';
-  var v=$('view');
-  if(TAB==='loans'){
-    $('title').textContent='Loans';$('subtitle').textContent=S.loans.length?'Monthly commitment '+m(S.totals.monthly):'No loans yet';
-    var h='<div class="card"><div class="row"><div><div class="mute">Still to pay</div><div class="big">'+m(S.totals.remaining)+'</div></div><div style="text-align:right"><div class="mute">of which interest</div><div class="big" style="color:var(--int)">'+m(S.totals.remainingInterest)+'</div></div></div></div>';
-    h+=S.loans.map(loanCard).join('')||'<div class="card mute">Tap + to add your first installment.</div>';v.innerHTML=h;
-  }else{
-    var sp=S.spend;$('title').textContent='Spending';$('subtitle').textContent='Today '+m(sp.today)+' · This month '+m(sp.month);
-    var h='';
-    if(sp.budget){var p=Math.min(100,sp.month/sp.budget*100);h+='<div class="card"><div class="row"><b>Monthly budget</b><span class="mute">'+m(sp.budget)+'</span></div><div class="bar"><i style="width:'+p+'%;background:'+(sp.month>sp.budget?'var(--bad)':'var(--brand)')+'"></i></div><div class="mute">'+(sp.month>sp.budget?'Over by '+m(sp.month-sp.budget):m(sp.budget-sp.month)+' left')+'</div></div>'}
-    var max=sp.categories.length?sp.categories[0].s:1;
-    h+='<div class="card"><b>This month by category</b>'+(sp.categories.map(function(c){return'<div class="cat"><b>'+esc(c.category)+'</b><div class="bar"><i style="width:'+c.s/max*100+'%;background:var(--brand)"></i></div><span>'+m(c.s)+'</span></div>'}).join('')||'<div class="mute">Nothing yet.</div>')+'</div>';
-    h+='<div class="card"><div class="row"><b>Recent</b><span><button class="ghost" onclick="act(\'/api/undo\',{})">Undo last</button> <button class="ghost" onclick="budgetSheet()">Budget</button></span></div>'+
-      sp.recent.map(function(e){return'<div class="row" style="margin-top:8px"><span>'+esc(e.category)+(e.note?' <span class="mute">'+esc(e.note)+'</span>':'')+'</span><span>'+m(e.amount_cents)+'</span></div>'}).join('')+'</div>';
-    v.innerHTML=h}
-}
-function sheet(h){$('sheetBody').innerHTML=h;$('sheet').classList.remove('hidden')}
+  hero();
+  $('view').innerHTML=TAB==='loans'?loansView():spendView();
+  if(TAB==='spend'&&S.spend.daily)bindChart('dchart',i=>{const d=S.spend.daily[i];$('dread').innerHTML=`<b>${fmtDateY(d.date)}</b> · <b class="num">${m(d.cents)}</b>`});}
+
+/* ---------- sheets ---------- */
+function sheet(h){$('sheetBody').innerHTML='<div class="grab"></div>'+h;$('sheet').classList.remove('hidden')}
 function closeSheet(){$('sheet').classList.add('hidden')}
 function openAdd(){TAB==='loans'?loanForm():expForm()}
-function expForm(){sheet('<h3 style="margin-top:0">Add expense</h3><label>Amount</label><input id="ea" type="number" inputmode="decimal" step="0.01"><label>Category</label><input id="ec" placeholder="food, transport…" list="cats"><datalist id="cats">'+S.spend.categories.map(function(c){return'<option value="'+esc(c.category)+'">'}).join('')+'</datalist><label>Note (optional)</label><input id="en"><button style="width:100%" onclick="act(\'/api/expense\',{amount:$(\'ea\').value,category:$(\'ec\').value,note:$(\'en\').value})">Save</button>');$('ea').focus()}
-function budgetSheet(){sheet('<h3 style="margin-top:0">Monthly budget</h3><input id="ba" type="number" inputmode="decimal"><button style="width:100%" onclick="act(\'/api/budget\',{amount:$(\'ba\').value})">Save</button>')}
-function loanForm(){sheet('<h3 style="margin-top:0">Add installment</h3><label>Name</label><input id="ln"><label>Total amount borrowed</label><input id="la" type="number" inputmode="decimal"><label>Interest rate % per year (0 if none)</label><input id="lr" type="number" inputmode="decimal" value="0"><label>Number of months</label><input id="lm" type="number" inputmode="numeric"><label>Due day of month (1-31)</label><input id="ld" type="number" inputmode="numeric"><label>Payments already made</label><input id="lp" type="number" inputmode="numeric" value="0"><label>Rate type</label><select id="lf"><option value="">Reducing balance</option><option value="1">Flat rate</option></select><button style="width:100%" onclick="act(\'/api/loan\',{name:$(\'ln\').value,amount:$(\'la\').value,rate:$(\'lr\').value,months:$(\'lm\').value,dueDay:$(\'ld\').value,paid:$(\'lp\').value,flat:!!$(\'lf\').value})">Add</button>')}
-function loanSheet(id){var l=S.loans.filter(function(x){return x.id===id})[0];
-  sheet('<h3 style="margin-top:0">'+esc(l.name)+'</h3><div class="mute">'+l.rate+'% '+(l.mode==='flat'?'flat':'reducing')+' · '+l.months+' months · monthly '+m(l.payment)+'</div>'+
-  '<div class="row" style="margin:12px 0"><span>Total interest</span><b>'+m(l.totalInterest)+'</b></div><div class="row"><span>Interest paid so far</span><b>'+m(l.paidInterest)+'</b></div><div class="row"><span>Interest remaining</span><b>'+m(l.remainingInterest)+'</b></div>'+
-  (l.schedule.length?'<table style="margin-top:14px"><tr><th>#</th><th>Due</th><th>Pay</th><th>Interest</th><th>Balance</th></tr>'+l.schedule.map(function(r){return'<tr><td>'+r.n+'</td><td>'+r.due.slice(2)+'</td><td>'+(r.payment/100).toFixed(2)+'</td><td>'+(r.interest/100).toFixed(2)+'</td><td>'+(Math.max(r.balance,0)/100).toFixed(2)+'</td></tr>'}).join('')+'</table>':'')+
-  '<div class="row" style="margin-top:16px"><button class="ghost" onclick="act(\'/api/unpay\',{id:'+id+'})">Undo last payment</button><button class="danger" onclick="act(\'/api/delloan\',{id:'+id+'},\'Delete this loan?\')">Delete</button></div>')}
+function expForm(){
+  const known=S.spend.categories.map(c=>c.category);
+  sheet(`<h2 style="font-size:22px;letter-spacing:-.02em">Add expense</h2>
+  <label>Amount (${esc(S.currency.trim())})</label><input id="ea" type="number" inputmode="decimal" step="0.01" placeholder="0.00" style="font-size:26px;font-weight:700">
+  <label>Category</label><input id="ec" placeholder="food, transport…" list="cats" autocapitalize="none">
+  <datalist id="cats">${known.map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+  <label>Note (optional)</label><input id="en">
+  <button class="btn" style="width:100%;margin-top:18px" onclick="act('/api/expense',{amount:$('ea').value,category:$('ec').value,note:$('en').value})">Save expense</button>`);
+  setTimeout(()=>$('ea').focus(),50)}
+function budgetSheet(){sheet(`<h2 style="font-size:22px">Monthly budget</h2><label>Amount</label><input id="ba" type="number" inputmode="decimal" placeholder="1500"><button class="btn" style="width:100%;margin-top:18px" onclick="act('/api/budget',{amount:$('ba').value})">Save</button>`)}
+function loanForm(){
+  sheet(`<h2 style="font-size:22px;letter-spacing:-.02em">Add installment</h2>
+  <label>Name</label><input id="ln" placeholder="Car, Phone, Laptop…">
+  <div class="g2"><div><label>Amount borrowed</label><input id="la" type="number" inputmode="decimal"></div><div><label>Interest % / year</label><input id="lr" type="number" inputmode="decimal" value="0"></div></div>
+  <div class="g2"><div><label>Months</label><input id="lm" type="number" inputmode="numeric"></div><div><label>Due day (1-31)</label><input id="ld" type="number" inputmode="numeric"></div></div>
+  <div class="g2"><div><label>Already paid</label><input id="lp" type="number" inputmode="numeric" value="0"></div><div><label>Rate type</label><select id="lf"><option value="">Reducing</option><option value="1">Flat</option></select></div></div>
+  <button class="btn" style="width:100%;margin-top:18px" onclick="act('/api/loan',{name:$('ln').value,amount:$('la').value,rate:$('lr').value,months:$('lm').value,dueDay:$('ld').value,paid:$('lp').value,flat:!!$('lf').value})">Add installment</button>`)}
+
+function loanSheet(id){
+  const l=S.loans.find(x=>x.id===id);SEL=l;
+  const n=l.curve.length,labels=l.curve.map((_,i)=>`#${i+1}`);
+  sheet(`<div class="row"><h2 style="font-size:24px;letter-spacing:-.02em">${esc(l.name)}</h2>${dueBadge(l)}</div>
+  <div class="mute" style="margin-top:2px">${l.rate}% ${l.mode==='flat'?'flat':'reducing'} · ${l.months} months · ${m(l.payment)}/month</div>
+  <div class="stats" style="margin-top:14px">
+    <div class="card stat" style="margin:0;box-shadow:none;background:var(--bg)"><div class="k">Total interest</div><div class="v num">${m(l.totalInterest)}</div></div>
+    <div class="card stat" style="margin:0;box-shadow:none;background:var(--bg)"><div class="k">Remaining</div><div class="v num">${m(l.remainingTotal)}</div></div>
+    <div class="card stat" style="margin:0;box-shadow:none;background:var(--bg)"><div class="k">Interest paid</div><div class="v num">${m(l.paidInterest)}</div></div>
+    <div class="card stat" style="margin:0;box-shadow:none;background:var(--bg)"><div class="k">Interest left</div><div class="v num">${m(l.remainingInterest)}</div></div></div>
+  <h3 style="margin:18px 0 6px">Every payment: principal vs interest</h3>
+  ${stackChart('lchart',l.curve,l.paid,labels)}
+  <div class="legend"><span><span class="dot" style="background:var(--s1)"></span>Principal</span><span><span class="dot" style="background:var(--s2)"></span>Interest</span><span class="tiny">faded = already paid</span></div>
+  <div class="readout" id="lread">Tap a bar to see that payment.</div>
+  ${l.schedule.length?`<h3 style="margin:14px 0 4px">Upcoming</h3><table><tr><th>#</th><th>Due</th><th>Pay</th><th>Interest</th><th>Balance</th></tr>${l.schedule.map(r=>`<tr><td>${r.n}</td><td>${fmtDate(r.due)}</td><td>${num(r.payment)}</td><td>${num(r.interest)}</td><td>${num(Math.max(r.balance,0))}</td></tr>`).join('')}</table>`:''}
+  <div class="actions" style="margin-top:18px"><button class="btn ghost" style="flex:1" onclick="act('/api/unpay',{id:${id}})">Undo last payment</button><button class="btn plain" onclick="act('/api/delloan',{id:${id}},'Delete this loan?')">Delete</button></div>`);
+  bindChart('lchart',i=>{const [p,it]=l.curve[i];$('lread').innerHTML=`<b>Payment #${i+1}</b>${i<l.paid?' (paid)':''} · <b class="num">${m(p+it)}</b> = <span class="num">${m(p)}</span> principal + <span class="num">${m(it)}</span> interest`})}
+
 boot();
 </script>
 </body>
