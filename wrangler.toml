@@ -1,0 +1,21 @@
+name = "installment-bot"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+CURRENCY = "$"          # symbol shown before amounts
+TZ_OFFSET_HOURS = "8"   # your UTC offset (e.g. 8 for MYT/SGT/PHT, 7 for WIB)
+REMINDER_HOUR = "9"     # local hour (0-23) for the daily reminder
+
+[triggers]
+crons = ["0 * * * *"]   # hourly; the bot only sends at REMINDER_HOUR
+
+[[d1_databases]]
+binding = "DB"
+database_name = "installment-bot"
+database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+
+# Secrets (set with `wrangler secret put <NAME>`):
+#   BOT_TOKEN        - token from @BotFather
+#   WEBHOOK_SECRET   - any random string, also passed to Telegram's setWebhook
+#   ALLOWED_CHAT_ID  - (optional) your Telegram chat id; other chats are ignored
