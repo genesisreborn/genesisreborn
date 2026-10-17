@@ -8,3 +8,4 @@ apscheduler>=3.10,<4
 anthropic>=0.70
 python-dotenv>=1.0
 pytest>=8.0
+websockets>=12

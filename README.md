@@ -64,7 +64,27 @@
 - 可选“只提醒一次”（触发后自动关闭）或“每根 K 线都提醒”。价格类提醒在图表上画虚线。
 - 与策略信号一起每 `SIGNAL_REFRESH_MINUTES` 检查一次，按 K 线收盘判断；触发后推送 Telegram，`/alerts` 查看生效中的提醒。
 
-> 系统只给信号和提醒，不会自动下单。
+**参数优化（走前验证）**
+- 「策略」页 →「参数优化」：每行写一个参数的范围，如 `fast=5:30:5`、`slow=20:100:10`（最多 300 组）。
+- 两种方法：
+  - **走前验证（推荐）**：用前一段数据选出最优参数，在紧接着的下一段数据上实盘般交易，再往后滚动，共 N 折。把每一折的“下一段”拼起来，就是不含偷看的真实表现。
+  - **训练/测试切分**：前 70% 选参数，后 30% 检验。
+- 结果给出样本外收益、同期买入持有、盈利窗口数、参数稳定性；两个参数时显示热力图，看最优点周围是不是一片都好（稳健）还是孤立的尖峰（过拟合）。
+- 自动提示过拟合迹象：样本外夏普远低于样本内、每折选出的参数都不同、跑不赢买入持有等。
+- “把推荐参数填进策略”一键回填，回测确认后再保存。
+
+**模拟账户**
+- 把策略的“信号出现时”设为“同时在模拟账户下单”并启用实时信号。
+- 信号在下一根 K 线开盘成交（含手续费、滑点），按策略的止损/止盈自动平仓；每笔占账户净值的比例可设（默认 10%）。
+- 「账户」页：净值、收益、现金、已实现/浮动盈亏、胜率、持仓、平仓记录、订单、每日净值曲线；可重置初始资金。
+- 成交和平仓推送到 Telegram（只发给 `TELEGRAM_CHAT_IDS` 里的管理员）；Telegram 里 `/account` 查看账户。
+
+**盘中实时提醒**
+- 价格类提醒（上穿/下穿/高于/低于）可勾选“⚡ 盘中实时”：价格一触及就推送，不等 K 线收盘。
+- 有 `MASSIVE_API_KEY` 时用 Massive WebSocket 秒级推送；否则每 `REALTIME_POLL_SECONDS` 秒轮询一次最新价（Yahoo 或 Massive REST）。
+- “每根 K 线都提醒”的实时提醒触发后 15 分钟内不重复。
+
+> 系统只给信号、提醒和模拟成交，不会在真实券商账户下单。
 
 ## 工作原理（热门雷达）
 
@@ -194,6 +214,9 @@ cp .env.example .env && docker compose up -d --build
 | `GET/PUT /api/watchlist` | 自选列表 |
 | `POST /api/scan` | 策略扫描：`{"strategy": {...}, "universe": "both"/"watchlist"/"hot"}` 或指定 `"symbols"` |
 | `GET/POST /api/alerts`、`DELETE /api/alerts/{id}`、`POST /api/alerts/run` | 条件提醒 |
+| `POST /api/optimize` | 参数优化：`{"strategy": {...}, "symbol", "grid": {"fast": "5:30:5"}, "mode": "walk_forward"/"split", "objective"}` |
+| `GET /api/paper`、`POST /api/paper/reset`、`POST /api/paper/process` | 模拟账户 |
+| `GET /api/realtime` | 盘中实时监控状态 |
 
 设置 `API_TOKEN` 后，所有写操作（生成报告、保存/删除策略、修改自选、立即检查）都要带 `Authorization: Bearer <token>`；网页第一次遇到时会提示输入并记住。
 
@@ -221,7 +244,8 @@ stockpulse/
   market_data.py    K 线数据（Yahoo / Massive）、缓存、判断 K 线是否收盘
   indicators.py     技术指标
   strategy/         策略：dsl.py 规则语言、presets.py 模板、backtest.py 回测、signals.py 实时信号、
-                    scanner.py 多代码扫描、alerts.py 条件提醒
+                    scanner.py 多代码扫描、alerts.py 条件提醒、optimize.py 参数优化、paper.py 模拟账户
+  realtime.py       盘中实时价格提醒（WebSocket / 轮询）
   telegram_bot.py   推送与机器人命令
   scheduler.py      定时任务
   web/              FastAPI；static/index.html 热门雷达，static/chart.html 图表策略页，trading.py 图表/策略 API

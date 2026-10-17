@@ -18,7 +18,9 @@ from .config import Settings
 from .db import Database
 from .pipeline import run_cycle
 from .report import generate_report
+from .realtime import RealtimeMonitor
 from .strategy.alerts import AlertEngine
+from .strategy.paper import PaperAccount
 from .strategy.signals import SignalEngine
 from .telegram_bot import TelegramNotifier
 
@@ -34,6 +36,8 @@ class Engine:
         self.notifier = TelegramNotifier(settings, self.db)
         self.signals = SignalEngine(self.db, settings)
         self.alerts = AlertEngine(self.db, self.signals.store)
+        self.paper = PaperAccount(self.db, self.signals.store, settings)
+        self.realtime = RealtimeMonitor(self.db, settings, on_fire=self._realtime_fired)
         self.scheduler = BackgroundScheduler(timezone=settings.timezone)
 
     def refresh(self) -> dict:
@@ -64,11 +68,21 @@ class Engine:
 
     def run_signals(self) -> list[dict]:
         new = self.signals.run()
-        if self.settings.telegram_enabled:
-            for sig in new:
-                if sig.get("notify", True):
-                    self.notifier.send_signal(sig)
+        tg = self.settings.telegram_enabled
+        for sig in new:
+            if tg and sig.get("notify", True):
+                self.notifier.send_signal(sig)
+            if sig.get("execution") == "paper":
+                self.paper.submit(sig)
+        # fill pending paper orders / check paper stops on every run
+        for ev in self.paper.process():
+            if tg:
+                self.notifier.send_paper_event(ev)
         return new
+
+    def _realtime_fired(self, alert: dict) -> None:
+        if self.settings.telegram_enabled:
+            self.notifier.send_realtime_alert(alert)
 
     def run_alerts(self) -> list[dict]:
         fired = self.alerts.run()
@@ -81,7 +95,8 @@ class Engine:
         try:
             for sym in self.db.get_watchlist(self.settings.watchlist):  # keep watchlist quotes fresh
                 self.signals.store.maybe_update(sym, "1d", min_gap_s=60)
-            if self.db.list_strategies(enabled_only=True):
+            if self.db.list_strategies(enabled_only=True) or self.db.query(
+                    "SELECT 1 FROM paper_orders WHERE status='pending' UNION SELECT 1 FROM paper_positions LIMIT 1"):
                 self.run_signals()
             if self.db.list_alerts(active_only=True):
                 self.run_alerts()
@@ -109,11 +124,13 @@ class Engine:
         self.scheduler.start()
         if s.telegram_enabled:
             self.notifier.start_polling()
+        self.realtime.start()
         log.info("scheduler started: refresh every %d min, reports at %s (%s), telegram=%s, claude=%s, demo=%s",
                  s.refresh_minutes, s.daily_report_times, s.timezone, s.telegram_enabled, s.claude_enabled,
                  s.demo_mode)
 
     def shutdown(self) -> None:
         self.notifier.stop()
+        self.realtime.stop()
         if self.scheduler.running:
             self.scheduler.shutdown(wait=False)

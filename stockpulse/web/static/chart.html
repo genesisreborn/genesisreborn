@@ -119,6 +119,13 @@ tr.active td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 details summary { cursor: pointer; color: var(--muted); }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; background: var(--panel-2); padding: 0 3px; border-radius: 3px; }
 .toggle { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.warn-box { border: 1px solid var(--warn); color: var(--warn); border-radius: 8px; padding: 8px 10px; margin: 8px 12px; font-size: 12px; }
+.heat { border-collapse: separate; border-spacing: 2px; }
+.heat td, .heat th { text-align: center; padding: 4px 6px; font-size: 11px; border: 0; border-radius: 3px; font-variant-numeric: tabular-nums; }
+.heat td.best { outline: 2px solid var(--text); }
+.opt-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 0 12px 12px; }
+#paperEq { height: 160px; position: relative; margin: 6px 0; }
+@media (max-width: 900px) { .opt-grid { grid-template-columns: minmax(0, 1fr); } }
 
 @media (max-width: 900px) {
   .app { height: auto; }
@@ -178,6 +185,16 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
           </div>
         </div>
         </div>
+        <div id="optView" hidden>
+          <div class="metrics" id="optMetrics"></div>
+          <div id="optWarn"></div>
+          <div class="opt-grid">
+            <div style="overflow:auto"><table><thead id="optHead"></thead><tbody id="optBody"></tbody></table></div>
+            <div style="overflow:auto"><div id="optHeat"></div></div>
+          </div>
+          <div class="row" style="padding:0 12px 12px;justify-content:flex-start"><button class="primary" id="optApply" style="flex:0 0 auto">把推荐参数填进策略</button>
+            <span class="muted" style="font-size:11px">样本内选参数、样本外检验；只看样本外结果才不会被过拟合骗。</span></div>
+        </div>
         <div id="scanView" hidden>
           <div class="metrics" id="scanMetrics"></div>
           <div style="overflow:auto;padding:0 12px 12px">
@@ -198,6 +215,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
         <button data-tab="strategy">策略</button>
         <button data-tab="signals">信号</button>
         <button data-tab="alerts">提醒</button>
+        <button data-tab="account">账户</button>
       </div>
 
       <div class="tab on" id="tab-watch">
@@ -232,6 +250,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
           <div class="field"><label>止盈 %</label><input id="fTP" type="number" min="0" step="0.5"></div>
           <div class="field"><label>ATR 止损倍数</label><input id="fATR" type="number" min="0" step="0.5"></div>
         </div>
+        <div class="row">
+          <div class="field"><label>信号出现时</label><select id="fExec"><option value="signal">只通知</option><option value="paper">同时在模拟账户下单</option></select></div>
+          <div class="field"><label>每笔占模拟账户 %</label><input id="fAlloc" type="number" min="1" max="100" step="1" value="10"></div>
+        </div>
         <div class="row" style="justify-content:flex-start">
           <label class="toggle" style="flex:0 0 auto"><input type="checkbox" id="fEnabled"> 启用实时信号</label>
           <label class="toggle" style="flex:0 0 auto"><input type="checkbox" id="fNotify" checked> 推送 Telegram</label>
@@ -246,6 +268,19 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
           </select>
           <button id="scanBtn">扫描：谁现在有信号</button>
         </div>
+        <details id="optBox" style="margin-top:8px"><summary>参数优化（走前验证）</summary>
+          <div class="field"><label>参数范围（每行 名称=起点:终点:步长，或用逗号列出取值）</label><textarea id="oGrid" rows="3" placeholder="fast=5:30:5&#10;slow=20:100:10"></textarea></div>
+          <div class="row">
+            <div class="field"><label>方法</label><select id="oMode"><option value="walk_forward">走前验证（推荐）</option><option value="split">训练/测试切分</option></select></div>
+            <div class="field"><label>优化目标</label><select id="oObj"><option value="sharpe">夏普比率</option><option value="calmar">收益/回撤</option><option value="total_return">总收益</option><option value="profit_factor">盈亏比</option></select></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>折数（走前）</label><input id="oFolds" type="number" min="2" max="8" value="4"></div>
+            <div class="field"><label>训练占比 %（切分）</label><input id="oTrain" type="number" min="30" max="90" value="70"></div>
+            <div class="field"><label>最少交易次数</label><input id="oMin" type="number" min="0" value="3"></div>
+          </div>
+          <button class="primary" id="optBtn" style="width:100%">在当前图表上优化</button>
+        </details>
         <div id="formMsg"></div>
         <details style="margin-top:10px"><summary>规则语法说明</summary>
           <div style="font-size:12px;margin-top:6px">
@@ -270,6 +305,23 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
         <p class="muted" style="font-size:11px" id="sigNote"></p>
       </div>
 
+      <div class="tab" id="tab-account">
+        <div class="section-title">模拟账户 <span class="spacer"></span><button id="pProcess">刷新成交</button><button class="danger" id="pReset">重置</button></div>
+        <div class="metrics" id="pMetrics" style="padding:0"></div>
+        <div id="paperEq"></div>
+        <div class="section-title">持仓</div>
+        <div style="overflow:auto"><table>
+          <thead><tr><th>代码</th><th>方向</th><th class="num">数量</th><th class="num">成本</th><th class="num">现价</th><th class="num">浮盈</th><th class="num">止损</th></tr></thead>
+          <tbody id="pPos"></tbody></table></div>
+        <div class="section-title">已平仓</div>
+        <div style="overflow:auto"><table>
+          <thead><tr><th>代码</th><th>方向</th><th class="num">开仓</th><th class="num">平仓</th><th class="num">盈亏</th><th>原因</th></tr></thead>
+          <tbody id="pTrades"></tbody></table></div>
+        <div class="section-title">订单</div>
+        <div id="pOrders"></div>
+        <p class="muted" style="font-size:11px">把策略的“信号出现时”设为“同时在模拟账户下单”并启用实时信号，信号会在下一根 K 线开盘按价成交（含手续费、滑点），止损止盈自动执行。先跑几周，看实际表现是否接近回测。</p>
+      </div>
+
       <div class="tab" id="tab-alerts">
         <div class="section-title">新建提醒</div>
         <div class="row">
@@ -292,7 +344,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
           <div class="field"><label>触发方式</label><select id="aMode"><option value="once">只提醒一次</option><option value="every_bar">每根 K 线都提醒</option></select></div>
           <div class="field"><label>备注</label><input id="aNote"></div>
         </div>
+        <label class="toggle" id="aRtRow"><input type="checkbox" id="aRealtime"> ⚡ 盘中实时（价格一触及就提醒，不等 K 线收盘）</label>
         <div class="row"><button class="primary" id="aSave">添加提醒</button></div>
+        <div class="muted" style="font-size:11px" id="rtStatus"></div>
         <div id="aMsg"></div>
         <p class="muted" style="font-size:11px">提醒在 K 线收盘时检查（想更及时就选 1 分钟或 5 分钟周期），触发后推送 Telegram。价格类提醒会在图表上画出虚线。</p>
         <div class="section-title">我的提醒 <span class="spacer"></span><button id="aRun">立即检查</button></div>
@@ -585,6 +639,7 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === "tab-" + b.dataset.tab));
   store.set("sp.tab", b.dataset.tab);
   if (b.dataset.tab === "signals") loadSignals();
+  if (b.dataset.tab === "account") loadPaper();
   if (b.dataset.tab === "alerts") { $("aSym").value = state.symbol; $("aInterval").value = state.interval; $("aType").onchange(); loadAlerts(); }
 });
 
@@ -600,6 +655,7 @@ function formToConfig() {
     params, long_entry: $("fLE").value, long_exit: $("fLX").value, short_entry: $("fSE").value, short_exit: $("fSX").value,
     stop_loss_pct: Number($("fSL").value || 0), take_profit_pct: Number($("fTP").value || 0), atr_stop_mult: Number($("fATR").value || 0),
     enabled: $("fEnabled").checked, notify: $("fNotify").checked, preset: $("presetSel").value || null,
+    execution: $("fExec").value, alloc_pct: Number($("fAlloc").value || 10),
   };
 }
 function configToForm(c) {
@@ -611,6 +667,8 @@ function configToForm(c) {
   $("fLE").value = c.long_entry || ""; $("fLX").value = c.long_exit || ""; $("fSE").value = c.short_entry || ""; $("fSX").value = c.short_exit || "";
   $("fSL").value = c.stop_loss_pct || ""; $("fTP").value = c.take_profit_pct || ""; $("fATR").value = c.atr_stop_mult || "";
   $("fEnabled").checked = !!c.enabled; $("fNotify").checked = c.notify !== false;
+  $("fExec").value = c.execution === "paper" ? "paper" : "signal"; $("fAlloc").value = c.alloc_pct || 10;
+  $("oGrid").value = suggestGrid(c.params || {});
   $("formMsg").innerHTML = "";
   store.set("sp.draft", c);
 }
@@ -678,7 +736,7 @@ $("btClose").onclick = () => { $("bottom").classList.remove("open"); state.backt
 
 function renderBacktest(bt, name) {
   const m = bt.metrics;
-  $("bottom").classList.add("open"); $("btView").hidden = false; $("scanView").hidden = true;
+  showBottom("btView");
   $("btTitle").textContent = `回测：${name} · ${bt.symbol} · ${bt.interval}`;
   $("btSub").textContent = `${new Date(m.start * 1000).toLocaleDateString(undefined, {timeZone: "UTC"})} → ${new Date(m.end * 1000).toLocaleDateString(undefined, {timeZone: "UTC"})} · ${m.bars} 根 K 线 · 手续费 ${bt.costs_bps.commission}bp + 滑点 ${bt.costs_bps.slippage}bp，收盘出信号、次根开盘成交`;
   const cards = [
@@ -712,6 +770,137 @@ function renderBacktest(bt, name) {
   eqChart.timeScale().fitContent();
 }
 
+function showBottom(view) {
+  $("bottom").classList.add("open");
+  ["btView", "scanView", "optView"].forEach(v => $(v).hidden = v !== view);
+}
+
+// ---------------------------------------------------------------- optimizer
+function suggestGrid(params) {
+  return Object.entries(params).map(([k, v]) => {
+    v = Number(v);
+    if (!Number.isFinite(v) || v === 0) return `${k}=${v}`;
+    const isInt = Number.isInteger(v);
+    const step = isInt ? Math.max(1, Math.round(v / 4)) : +(v / 4).toFixed(2);
+    const lo = isInt ? Math.max(1, v - 2 * step) : +(v - 2 * step).toFixed(2);
+    return `${k}=${lo}:${+(v + 2 * step).toFixed(2)}:${step}`;
+  }).join("\n");
+}
+let lastOpt = null;
+$("optBtn").onclick = async () => {
+  const grid = {};
+  $("oGrid").value.split("\n").map(x => x.trim()).filter(Boolean).forEach(line => {
+    const i = line.indexOf("="); if (i > 0) grid[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  });
+  $("optBtn").disabled = true; $("optBtn").textContent = "优化中…"; $("formMsg").innerHTML = "";
+  try {
+    const out = await api("/api/optimize", { method: "POST", body: JSON.stringify({
+      strategy: { ...formToConfig(), interval: state.interval }, symbol: state.symbol, grid,
+      mode: $("oMode").value, objective: $("oObj").value, folds: Number($("oFolds").value), train_pct: Number($("oTrain").value),
+      min_trades: Number($("oMin").value) }) });
+    lastOpt = out; renderOpt(out);
+  } catch (e) { $("formMsg").innerHTML = `<div class="errors">${esc(e.message)}</div>`; }
+  $("optBtn").disabled = false; $("optBtn").textContent = "在当前图表上优化";
+};
+$("optApply").onclick = () => {
+  if (!lastOpt) return;
+  const cfg = formToConfig(); cfg.params = { ...cfg.params, ...lastOpt.best_params };
+  configToForm(cfg); $("formMsg").innerHTML = '<div class="ok">已填入推荐参数，记得回测确认后保存</div>';
+};
+const paramStr = (p) => Object.entries(p).map(([k, v]) => `${k}=${+v}`).join(", ");
+const dateStr = (t) => new Date(t * 1000).toLocaleDateString(undefined, { timeZone: "UTC" });
+function renderOpt(o) {
+  showBottom("optView");
+  state.backtest = null; applyMarkers();
+  const objName = o.objectives[o.objective];
+  $("btTitle").textContent = `参数优化 · ${o.symbol} · ${o.interval} · ${o.mode === "walk_forward" ? "走前验证" : "训练/测试切分"}`;
+  $("btSub").textContent = `${o.combos} 组参数 · 目标：${objName}`;
+  let cards;
+  if (o.mode === "walk_forward") {
+    cards = [["样本外累计收益", pctHtml(o.oos_total_return_pct)], ["同期买入持有", pctHtml(o.oos_buy_hold_pct)],
+             ["盈利的窗口", `${o.oos_positive_folds} / ${o.folds.length}`], ["参数稳定性", fmt(o.param_stability_pct, 1) + "%"],
+             ["推荐参数", `<span style="font-size:13px">${esc(paramStr(o.best_params))}</span>`]];
+    $("optHead").innerHTML = `<tr><th>折</th><th>训练区间</th><th>测试区间</th><th>选中参数</th><th class="num">样本内${esc(objName)}</th><th class="num">样本外收益</th><th class="num">样本外回撤</th><th class="num">交易</th></tr>`;
+    $("optBody").innerHTML = o.folds.map(f => `<tr><td>${f.fold}</td><td>${dateStr(f.train_range[0])}–${dateStr(f.train_range[1])}</td>
+      <td>${dateStr(f.test_range[0])}–${dateStr(f.test_range[1])}</td><td>${esc(paramStr(f.params))}</td>
+      <td class="num">${fmt(f.train[o.objective === "total_return" ? "total_return_pct" : o.objective])}</td>
+      <td class="num">${pctHtml(f.test.total_return_pct)}</td><td class="num down">${fmt(f.test.max_drawdown_pct)}%</td><td class="num">${f.test.trades}</td></tr>`).join("");
+  } else {
+    const b = o.best;
+    cards = [["样本内收益", pctHtml(b.train.total_return_pct)], ["样本外收益", pctHtml(b.test.total_return_pct)],
+             ["样本内夏普", fmt(b.train.sharpe)], ["样本外夏普", fmt(b.test.sharpe)], ["前 5 组样本外平均", pctHtml(o.top_test_mean_return_pct)],
+             ["推荐参数", `<span style="font-size:13px">${esc(paramStr(o.best_params))}</span>`]];
+    $("optHead").innerHTML = `<tr><th>#</th><th>参数</th><th class="num">样本内收益</th><th class="num">样本内夏普</th><th class="num">样本外收益</th><th class="num">样本外夏普</th><th class="num">样本外交易</th></tr>`;
+    $("optBody").innerHTML = o.rows.slice(0, 20).map((r, i) => `<tr><td>${i + 1}</td><td>${esc(paramStr(r.params))}</td>
+      <td class="num">${pctHtml(r.train.total_return_pct)}</td><td class="num">${fmt(r.train.sharpe)}</td>
+      <td class="num">${pctHtml(r.test.total_return_pct)}</td><td class="num">${fmt(r.test.sharpe)}</td><td class="num">${r.test.trades}</td></tr>`).join("");
+  }
+  $("optMetrics").innerHTML = cards.map(([k, v]) => `<div class="metric"><b>${v}</b><span>${k}</span></div>`).join("");
+  $("optWarn").innerHTML = (o.warnings || []).map(w => `<div class="warn-box">⚠ ${esc(w)}</div>`).join("");
+  $("optHeat").innerHTML = o.heatmap ? heatmapHtml(o.heatmap, o.best_params, objName) : '<p class="muted">两个参数时会显示参数热力图，用来判断最优点周围是否也稳定。</p>';
+}
+function heatmapHtml(h, best, objName) {
+  const vals = h.cells.map(c => c.value).filter(v => v != null);
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const cell = (x, y) => h.cells.find(c => c.x === x && c.y === y);
+  const accent = css("--s1");
+  let html = `<div class="muted" style="font-size:11px;margin-bottom:4px">${esc(objName)}热力图（${esc(h.y)} ↓ × ${esc(h.x)} →，颜色越深越好；灰色=交易太少）</div><table class="heat"><tr><th></th>${h.xs.map(x => `<th>${+x}</th>`).join("")}</tr>`;
+  h.ys.forEach(y => {
+    html += `<tr><th>${+y}</th>` + h.xs.map(x => {
+      const c = cell(x, y); const v = c && c.value;
+      if (v == null) return `<td style="background:var(--panel-2)" title="交易次数不足">·</td>`;
+      const t = hi > lo ? (v - lo) / (hi - lo) : 0.5;
+      const alpha = Math.round(15 + t * 75).toString(16).padStart(2, "0");
+      const isBest = +best[h.x] === +x && +best[h.y] === +y;
+      return `<td class="${isBest ? "best" : ""}" style="background:${accent}${alpha};color:${t > 0.6 ? "#fff" : "var(--text)"}" title="${esc(h.x)}=${+x}, ${esc(h.y)}=${+y}: ${fmt(v)}">${fmt(v, 1)}</td>`;
+    }).join("") + "</tr>";
+  });
+  return html + "</table>";
+}
+
+// ---------------------------------------------------------------- paper account
+let paperChart = null;
+async function loadPaper() {
+  let p;
+  try { p = await api("/api/paper"); } catch (e) { return; }
+  const cards = [["账户净值", fmt(p.equity)], ["总收益", pctHtml(p.return_pct)], ["现金", fmt(p.cash)],
+                 ["已实现盈亏", `<span class="${p.realized_pnl >= 0 ? "up" : "down"}">${fmt(p.realized_pnl)}</span>`],
+                 ["浮动盈亏", `<span class="${p.unrealized_pnl >= 0 ? "up" : "down"}">${fmt(p.unrealized_pnl)}</span>`],
+                 ["胜率", p.win_rate_pct == null ? "—" : fmt(p.win_rate_pct, 1) + "%"]];
+  $("pMetrics").innerHTML = cards.map(([k, v]) => `<div class="metric"><b>${v}</b><span>${k}</span></div>`).join("");
+  $("pPos").innerHTML = p.positions.map(x => `<tr class="click" data-s="${esc(x.symbol)}" data-iv="${esc(x.interval)}"><td><b>${esc(x.symbol)}</b><div class="muted" style="font-size:11px">${esc(x.strategy)}</div></td>
+      <td>${x.qty > 0 ? '<span class="up">多</span>' : '<span class="down">空</span>'}</td><td class="num">${fmt(Math.abs(x.qty), 2)}</td>
+      <td class="num">${fmt(x.entry_price)}</td><td class="num">${fmt(x.last_price)}</td><td class="num">${pctHtml(x.unrealized_pct)}<div style="font-size:11px">${fmt(x.unrealized)}</div></td><td class="num">${fmt(x.stop)}</td></tr>`).join("")
+    || `<tr><td colspan="7" class="muted">没有持仓</td></tr>`;
+  $("pPos").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => setSymbol(tr.dataset.s, tr.dataset.iv));
+  $("pTrades").innerHTML = p.trades.map(t => `<tr><td><b>${esc(t.symbol)}</b></td><td>${t.side === "long" ? "多" : "空"}</td>
+      <td class="num">${fmt(t.entry_price)}</td><td class="num">${fmt(t.exit_price)}</td>
+      <td class="num">${pctHtml(t.pnl_pct)}<div style="font-size:11px">${fmt(t.pnl)}</div></td><td>${esc(REASON[t.reason] || t.reason)}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="muted">还没有平仓记录</td></tr>`;
+  const ST = { pending: "待成交", filled: "已成交", rejected: "未成交", cancelled: "已取消" };
+  $("pOrders").innerHTML = p.orders.slice(0, 20).map(o => `<div class="sig"><b class="${(ACTION[o.action] || [])[1] || ""}">${esc((ACTION[o.action] || [o.action])[0])}</b> <b>${esc(o.symbol)}</b>
+      <span class="badge">${esc(ST[o.status] || o.status)}</span> ${o.fill_price ? "@ " + fmt(o.fill_price) : ""} ${o.note ? `<span class="muted">${esc(o.note)}</span>` : ""}
+      <div class="muted" style="font-size:11px">${esc(o.strategy || "")} · ${esc(new Date(o.created).toLocaleString())}</div></div>`).join("") || '<div class="muted">还没有订单</div>';
+  if (paperChart) paperChart.remove(); paperChart = null;
+  $("paperEq").innerHTML = "";
+  $("paperEq").style.height = p.equity_curve.length > 1 ? "160px" : "auto";
+  if (p.equity_curve.length > 1) {
+    paperChart = LWC.createChart($("paperEq"), { ...chartOptions(), timeScale: { borderColor: css("--line") } });
+    const s = paperChart.addSeries(LWC.AreaSeries, { lineColor: css("--s1"), topColor: css("--s1") + "40", bottomColor: css("--s1") + "05", lineWidth: 2, priceLineVisible: false });
+    s.setData(p.equity_curve.map(e => ({ time: e.day, value: e.equity })));
+    paperChart.timeScale().fitContent();
+  } else $("paperEq").innerHTML = '<div class="muted" style="padding:8px 0">净值曲线会按天累积。</div>';
+}
+$("pReset").onclick = async () => {
+  const cap = prompt("重置模拟账户，初始资金：", "100000"); if (!cap) return;
+  try { await api("/api/paper/reset", { method: "POST", body: JSON.stringify({ capital: Number(cap) }) }); } catch (e) { alert(e.message); }
+  loadPaper();
+};
+$("pProcess").onclick = async () => {
+  try { await api("/api/paper/process", { method: "POST" }); } catch (e) { alert(e.message); }
+  loadPaper();
+};
+
 // ---------------------------------------------------------------- scanner
 async function runScan() {
   const cfg = formToConfig();
@@ -726,7 +915,7 @@ $("scanBtn").onclick = runScan;
 
 function renderScan(out, cfg) {
   const sm = out.summary;
-  $("bottom").classList.add("open"); $("btView").hidden = true; $("scanView").hidden = false;
+  showBottom("scanView");
   state.backtest = null; applyMarkers();
   $("btTitle").textContent = `扫描：${out.strategy || "未命名策略"} · ${out.interval}`;
   $("btSub").textContent = `${sm.ok}/${sm.symbols} 个代码有数据`;
@@ -760,6 +949,9 @@ const ALERT_TYPES = {
 const PRICE_TYPES = ["cross_up", "cross_down", "above", "below"];
 $("aType").onchange = () => {
   const custom = $("aType").value === "custom";
+  const priceType = PRICE_TYPES.includes($("aType").value);
+  $("aRealtime").disabled = !priceType; if (!priceType) $("aRealtime").checked = false;
+  $("aRtRow").style.opacity = priceType ? 1 : 0.5;
   $("aCustomRow").hidden = !custom; $("aValueRow").hidden = custom;
   if (PRICE_TYPES.includes($("aType").value) && lastData) $("aValue").value = lastData.last.price;
   if ($("aType").value.startsWith("rsi")) $("aValue").value = $("aType").value === "rsi_below" ? 30 : 70;
@@ -769,7 +961,7 @@ $("aSave").onclick = async () => {
   if (t !== "custom" && (v === "" || Number.isNaN(Number(v)))) { $("aMsg").innerHTML = '<div class="errors">请填写数值</div>'; return; }
   const body = { symbol: $("aSym").value, interval: $("aInterval").value, mode: $("aMode").value, note: $("aNote").value,
                  condition: t === "custom" ? $("aCustom").value : ALERT_TYPES[t](Number(v)),
-                 level: PRICE_TYPES.includes(t) ? Number(v) : null };
+                 level: PRICE_TYPES.includes(t) ? Number(v) : null, kind: t, realtime: $("aRealtime").checked };
   try {
     await api("/api/alerts", { method: "POST", body: JSON.stringify(body) });
     $("aMsg").innerHTML = '<div class="ok">已添加</div>'; $("aNote").value = "";
@@ -777,10 +969,14 @@ $("aSave").onclick = async () => {
   } catch (e) { $("aMsg").innerHTML = `<div class="errors">${esc(e.message)}</div>`; }
 };
 async function loadAlerts() {
+  api("/api/realtime").then(rt => {
+    $("rtStatus").textContent = rt.mode === "off" ? "盘中实时已关闭（REALTIME_MODE=off）" :
+      `盘中实时：${rt.mode === "ws" ? "Massive WebSocket 推送" : "每隔几秒轮询最新价"} · 监控 ${rt.watched} 个提醒${rt.last_tick ? " · 最近报价 " + new Date(rt.last_tick).toLocaleTimeString() : ""}${rt.error ? " · ⚠ " + rt.error : ""}`;
+  }).catch(() => {});
   let list = [];
   try { list = await api("/api/alerts"); } catch (e) {}
   $("alertList").innerHTML = list.map(a => `<div class="strat-item">
-      <div class="row" style="margin:0"><b style="flex:0 0 auto">${esc(a.symbol)}</b><span class="badge" style="flex:0 0 auto">${esc(a.interval)}</span>
+      <div class="row" style="margin:0"><b style="flex:0 0 auto">${esc(a.symbol)}</b><span class="badge" style="flex:0 0 auto">${a.realtime ? "⚡ 实时" : esc(a.interval)}</span>
         <span style="flex:1">${a.active ? '<span class="up">生效中</span>' : '<span class="muted">已关闭</span>'}</span>
         <button class="danger" style="flex:0 0 auto" data-adel="${a.id}" aria-label="删除提醒">删除</button></div>
       <div><code>${esc(a.condition)}</code></div>

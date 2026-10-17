@@ -102,6 +102,26 @@ def format_signal(sig: dict) -> str:
     return "\n".join(lines)
 
 
+def format_paper_event(ev: dict) -> str:
+    if ev["type"] == "fill":
+        extra = "".join([f" · 止损 {ev['stop']}" if ev.get("stop") else "", f" · 止盈 {ev['target']}" if ev.get("target") else ""])
+        return f"📒 <b>模拟账户成交</b>\n{_e(ev['action'])} {_e(ev['symbol'])} × {ev['qty']:g} @ {ev['price']}{_e(extra)}\n策略：{_e(ev['strategy'])}"
+    if ev["type"] == "close":
+        icon = "🟢" if ev["pnl"] >= 0 else "🔴"
+        why = {"stop": "止损", "take_profit": "止盈", "signal": "策略信号"}.get(ev["reason"], ev["reason"])
+        return (f"📒 <b>模拟账户平仓</b>（{why}）\n{_e(ev['symbol'])} × {ev['qty']:g} @ {ev['price']}\n"
+                f"{icon} 盈亏 {ev['pnl']:+,.2f}（{ev['pnl_pct']:+.2f}%）· 策略：{_e(ev['strategy'])}")
+    return f"📒 模拟账户：{_e(ev['symbol'])} {_e(ev['action'])} 未成交（{_e(ev.get('note', ''))}）"
+
+
+def format_realtime_alert(a: dict) -> str:
+    kind = {"cross_up": "上穿", "cross_down": "下穿", "above": "高于", "below": "低于"}.get(a.get("kind"), "")
+    lines = [f"⚡ <b>盘中提醒 · {_e(a['symbol'])}</b>", f"最新价 {a['price']} {kind} {a.get('level')}"]
+    if a.get("note"):
+        lines.append(f"备注：{_e(a['note'])}")
+    return "\n".join(lines)
+
+
 def format_alert(a: dict) -> str:
     from .strategy.signals import bar_time_str
 
@@ -123,6 +143,9 @@ class TelegramNotifier:
         self._stop = threading.Event()
 
     # ---- sending ----
+    def is_owner(self, chat_id: str) -> bool:
+        return str(chat_id) in {str(c) for c in self.settings.telegram_chat_ids}
+
     def recipients(self) -> list[str]:
         return sorted(set(self.settings.telegram_chat_ids) | set(self.db.subscribers()))
 
@@ -154,6 +177,17 @@ class TelegramNotifier:
         return self.broadcast(format_report(snap, title=REPORT_TITLE if snap.get("report_id") else
                                             "📈 StockPulse 热门股简报"))
 
+    def notify_owners(self, text: str) -> int:
+        """Account messages go only to TELEGRAM_CHAT_IDS when set (not to every subscriber)."""
+        owners = [str(c) for c in self.settings.telegram_chat_ids]
+        return sum(self.send(c, text) for c in owners) if owners else self.broadcast(text)
+
+    def send_paper_event(self, ev: dict) -> int:
+        return self.notify_owners(format_paper_event(ev))
+
+    def send_realtime_alert(self, alert: dict) -> int:
+        return self.broadcast(format_realtime_alert(alert))
+
     def send_alert(self, alert: dict) -> int:
         return self.broadcast(format_alert(alert))
 
@@ -180,7 +214,7 @@ class TelegramNotifier:
         if cmd in ("/start", "/subscribe"):
             self.db.add_subscriber(chat_id)
             return ("✅ 已订阅 StockPulse！你会收到每日热门股简报和盘中异动提醒。\n\n"
-                    "/report 最新 AI 报告\n/signals 最近交易信号\n/alerts 生效中的提醒\n/top 实时热门榜\n/stock TSLA 查看个股\n/stop 取消订阅")
+                    "/report 最新 AI 报告\n/signals 最近交易信号\n/alerts 生效中的提醒\n/account 模拟账户\n/top 实时热门榜\n/stock TSLA 查看个股\n/stop 取消订阅")
         if cmd in ("/stop", "/unsubscribe"):
             self.db.remove_subscriber(chat_id)
             return "已取消订阅。发送 /start 可重新订阅。"
@@ -195,6 +229,20 @@ class TelegramNotifier:
                 return "还没有交易信号。在网页的「策略」页启用策略后，新信号会自动推送。"
             return "<b>最近的策略信号</b>\n" + "\n".join(
                 f"• {_e(describe_signal(s))} · {_e(s['strategy'])} · {_e(s['interval'])}" for s in sigs)
+        if cmd == "/account":
+            if self.settings.telegram_chat_ids and not self.is_owner(chat_id):
+                return "只有管理员可以查看账户。"
+            cash = float(self.db.get_kv("paper_cash", "0") or 0)
+            init = float(self.db.get_kv("paper_initial", "0") or 0)
+            rows = self.db.query("SELECT symbol, qty, entry_price FROM paper_positions") if self.db.query(
+                "SELECT name FROM sqlite_master WHERE name='paper_positions'") else []
+            lines = [f"<b>模拟账户</b>  现金 {cash:,.2f}（初始 {init:,.0f}）"]
+            for r in rows:
+                lines.append(f"• {_e(r['symbol'])} {'多' if r['qty'] > 0 else '空'} {abs(r['qty']):g} @ {r['entry_price']:.2f}")
+            if not rows:
+                lines.append("当前没有持仓")
+            lines.append("网页「账户」页有完整净值和盈亏。")
+            return "\n".join(lines)
         if cmd == "/alerts":
             items = self.db.list_alerts(active_only=True)
             if not items:
@@ -211,7 +259,7 @@ class TelegramNotifier:
                 if r["ticker"] == t:
                     return format_stock_detail(r)
             return f"{_e(t)} 目前不在热门榜/关注列表中。"
-        return "可用命令：/start /report /signals /alerts /top /stock TICKER /stop"
+        return "可用命令：/start /report /signals /alerts /account /top /stock TICKER /stop"
 
     def poll_forever(self) -> None:
         if not self.settings.telegram_enabled:

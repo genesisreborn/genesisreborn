@@ -99,7 +99,7 @@ class SignalEngine:
                            "bar_ts": state["bar_ts"], **s}
                     sid = self.db.add_signal(sig)
                     if sid:
-                        new.append({**sig, "id": sid, "notify": cfg.notify})
+                        new.append({**sig, "id": sid, "notify": cfg.notify, "execution": cfg.execution})
         if new:
             log.info("new signals: %s", [(s["symbol"], s["action"], s["strategy"]) for s in new])
         return new

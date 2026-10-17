@@ -52,6 +52,12 @@ class Settings:
     commission_bps: float = field(default_factory=lambda: float(os.getenv("COMMISSION_BPS", "5")))
     slippage_bps: float = field(default_factory=lambda: float(os.getenv("SLIPPAGE_BPS", "5")))
 
+    # ---- paper trading / real-time alerts ----
+    paper_capital: float = field(default_factory=lambda: float(os.getenv("PAPER_CAPITAL", "100000")))
+    realtime_mode: str = field(default_factory=lambda: os.getenv("REALTIME_MODE", "auto").strip().lower())  # auto|ws|poll|off
+    realtime_poll_seconds: int = field(default_factory=lambda: int(os.getenv("REALTIME_POLL_SECONDS", "20")))
+    massive_ws_url: str = field(default_factory=lambda: os.getenv("MASSIVE_WS_URL", "wss://socket.massive.com/stocks"))
+
     db_path: str = field(default_factory=lambda: os.getenv("DB_PATH", "data/stockpulse.db"))
     watchlist: list[str] = field(default_factory=lambda: [t.upper() for t in _list("WATCHLIST", "AAPL,NVDA,TSLA,MSFT,AMZN")])
     enable_social: bool = field(default_factory=lambda: _bool("ENABLE_SOCIAL", True))

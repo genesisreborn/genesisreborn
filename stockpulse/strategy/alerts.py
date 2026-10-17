@@ -23,6 +23,8 @@ class Alert:
     mode: str = "once"           # once: fire then deactivate | every_bar: fire on every closed bar it holds
     note: str = ""
     level: float | None = None   # price level for "price crosses" alerts (drawn on the chart)
+    kind: str = "custom"         # cross_up | cross_down | above | below | ... | custom
+    realtime: bool = False       # price-level alerts only: check live prices instead of closed bars
     active: bool = True
     id: int | None = None
     last_bar_ts: int | None = None
@@ -49,6 +51,8 @@ class Alert:
             errors.append(f"周期必须是 {', '.join(INTERVALS)} 之一")
         if self.mode not in ("once", "every_bar"):
             errors.append("触发方式必须是 once 或 every_bar")
+        if self.realtime and (self.kind not in ("cross_up", "cross_down", "above", "below") or self.level is None):
+            errors.append("只有价格类提醒（上穿/下穿/高于/低于）可以设为盘中实时")
         try:
             validate(self.condition)
         except DSLError as exc:
@@ -66,6 +70,8 @@ class AlertEngine:
         fired = []
         for raw in self.db.list_alerts(active_only=True):
             a = Alert.from_dict(raw)
+            if a.realtime:
+                continue  # handled by the real-time monitor
             if update:
                 self.store.maybe_update(a.symbol, a.interval, min_gap_s=30)
             bars = closed_bars(self.store.get(a.symbol, a.interval, ALERT_BARS, refresh_if_empty=not update),

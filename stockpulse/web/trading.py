@@ -15,6 +15,7 @@ from ..strategy.backtest import run_backtest
 from ..strategy.dsl import FUNCTION_NAMES, SERIES_NAMES, DSLError
 from ..strategy.presets import PRESETS
 from ..strategy.alerts import Alert
+from ..strategy.optimize import OBJECTIVES, OptimizeError, optimize
 from ..strategy.scanner import MAX_SYMBOLS, scan
 from ..strategy.signals import SignalEngine
 
@@ -252,6 +253,47 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
         if not symbols:
             raise HTTPException(400, "没有可扫描的代码")
         return scan(store, cfg, symbols[:MAX_SYMBOLS], settings.commission_bps, settings.slippage_bps)
+
+    @r.post("/optimize")
+    def optimize_params(body: dict[str, Any] = Body(...)):
+        """Body: {strategy: {...}, symbol, interval?, grid: {"fast": "5:30:5"}, mode: split|walk_forward,
+        objective, train_pct, folds, min_trades}"""
+        raw = body.get("strategy") or {}
+        if body.get("interval"):
+            raw = {**raw, "interval": body["interval"]}
+        cfg = parse_cfg(raw)
+        symbol = (body.get("symbol") or (cfg.symbols[0] if cfg.symbols else "")).upper()
+        if not symbol:
+            raise HTTPException(400, "请指定代码")
+        df = closed_bars(load(symbol, cfg.interval, int(body.get("limit") or 3000)), cfg.interval)
+        try:
+            out = optimize(df, cfg, body.get("grid") or {}, mode=body.get("mode", "split"),
+                           objective=body.get("objective", "sharpe"), train_pct=float(body.get("train_pct", 70)),
+                           folds=int(body.get("folds", 4)), min_trades=int(body.get("min_trades", 3)),
+                           commission_bps=settings.commission_bps, slippage_bps=settings.slippage_bps)
+        except (OptimizeError, DSLError) as exc:
+            raise HTTPException(400, {"errors": [str(exc)]}) from exc
+        return {"symbol": symbol, "interval": cfg.interval, "objectives": OBJECTIVES, **out}
+
+    # ---------------------------------------------------------------- paper account
+    @r.get("/paper")
+    def paper_summary():
+        return engine.paper.summary()
+
+    @r.post("/paper/reset")
+    def paper_reset(body: dict[str, Any] = Body(default={}), _=require_token):
+        engine.paper.reset(body.get("capital"))
+        return engine.paper.summary()
+
+    @r.post("/paper/process")
+    def paper_process(_=require_token):
+        return {"events": engine.paper.process()}
+
+    # ---------------------------------------------------------------- realtime
+    @r.get("/realtime")
+    def realtime_status():
+        return {**engine.realtime.status, "mode": engine.realtime.mode,
+                "watched": len(engine.realtime.watched())}
 
     # ---------------------------------------------------------------- alerts
     @r.get("/alerts")
