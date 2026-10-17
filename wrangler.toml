@@ -3,7 +3,7 @@ main = "src/index.js"
 compatibility_date = "2025-01-01"
 
 [vars]
-CURRENCY = "$"          # symbol shown before amounts
+CURRENCY = "MYR "      # shown before amounts
 TZ_OFFSET_HOURS = "8"   # your UTC offset (e.g. 8 for MYT/SGT/PHT, 7 for WIB)
 REMINDER_HOUR = "9"     # local hour (0-23) for the daily reminder
 
