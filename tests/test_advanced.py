@@ -207,5 +207,5 @@ def test_advanced_api(tmp_path):
         rt = c.get("/api/realtime").json()
         assert rt["mode"] == "poll" and rt["watched"] == 0
 
-        bad = preset("ema_cross", execution="broker").to_dict()
+        bad = preset("ema_cross", execution="broker").to_dict()  # broker needs symbols
         assert c.post("/api/strategies/validate", json=bad).json()["ok"] is False

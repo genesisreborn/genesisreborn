@@ -27,8 +27,8 @@ class StrategyConfig:
     symbols: list[str] = field(default_factory=list)
     enabled: bool = False            # live signal generation + alerts
     notify: bool = True              # push live signals to Telegram
-    execution: str = "signal"        # signal: notify only | paper: also trade the simulated account
-    alloc_pct: float = 10.0          # % of paper-account equity per position
+    execution: str = "signal"        # signal: notify only | paper: simulated account | broker: Alpaca orders
+    alloc_pct: float = 10.0          # % of account equity per position (paper / broker, broker also capped)
     id: int | None = None
     preset: str | None = None
 
@@ -65,8 +65,10 @@ class StrategyConfig:
                 errors.append(f"代码格式不对：{s}")
         if not 0 < self.position_pct <= 100:
             errors.append("仓位比例需在 0-100 之间")
-        if self.execution not in ("signal", "paper"):
-            errors.append("执行方式必须是 signal 或 paper")
+        if self.execution not in ("signal", "paper", "broker"):
+            errors.append("执行方式必须是 signal / paper / broker")
+        if self.execution == "broker" and not self.symbols:
+            errors.append("券商自动下单必须列出允许交易的代码")
         if not 0 < self.alloc_pct <= 100:
             errors.append("每笔资金占比需在 0-100 之间")
         for label, expr in (("做多开仓", self.long_entry), ("做多平仓", self.long_exit),

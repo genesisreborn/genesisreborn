@@ -251,8 +251,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
           <div class="field"><label>ATR 止损倍数</label><input id="fATR" type="number" min="0" step="0.5"></div>
         </div>
         <div class="row">
-          <div class="field"><label>信号出现时</label><select id="fExec"><option value="signal">只通知</option><option value="paper">同时在模拟账户下单</option></select></div>
-          <div class="field"><label>每笔占模拟账户 %</label><input id="fAlloc" type="number" min="1" max="100" step="1" value="10"></div>
+          <div class="field"><label>信号出现时</label><select id="fExec"><option value="signal">只通知</option><option value="paper">同时在模拟账户下单</option><option value="broker">⚠ 券商自动下单（Alpaca）</option></select></div>
+          <div class="field"><label>每笔占账户 %</label><input id="fAlloc" type="number" min="1" max="100" step="1" value="10"></div>
         </div>
         <div class="row" style="justify-content:flex-start">
           <label class="toggle" style="flex:0 0 auto"><input type="checkbox" id="fEnabled"> 启用实时信号</label>
@@ -319,6 +319,15 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
           <tbody id="pTrades"></tbody></table></div>
         <div class="section-title">订单</div>
         <div id="pOrders"></div>
+        <div class="section-title">券商自动交易（Alpaca） <span class="spacer"></span>
+          <button id="bPause">暂停</button><button class="danger" id="bFlatten">紧急清仓</button></div>
+        <div id="bStatus" class="muted" style="font-size:12px">加载中…</div>
+        <div class="metrics" id="bMetrics" style="padding:0"></div>
+        <div style="overflow:auto"><table>
+          <thead><tr><th>代码</th><th class="num">数量</th><th class="num">成本</th><th class="num">现价</th><th class="num">浮盈</th></tr></thead>
+          <tbody id="bPos"></tbody></table></div>
+        <div class="section-title">下单记录</div>
+        <div id="bLog"></div>
         <p class="muted" style="font-size:11px">把策略的“信号出现时”设为“同时在模拟账户下单”并启用实时信号，信号会在下一根 K 线开盘按价成交（含手续费、滑点），止损止盈自动执行。先跑几周，看实际表现是否接近回测。</p>
       </div>
 
@@ -639,7 +648,7 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === "tab-" + b.dataset.tab));
   store.set("sp.tab", b.dataset.tab);
   if (b.dataset.tab === "signals") loadSignals();
-  if (b.dataset.tab === "account") loadPaper();
+  if (b.dataset.tab === "account") { loadPaper(); loadBroker(); }
   if (b.dataset.tab === "alerts") { $("aSym").value = state.symbol; $("aInterval").value = state.interval; $("aType").onchange(); loadAlerts(); }
 });
 
@@ -667,7 +676,7 @@ function configToForm(c) {
   $("fLE").value = c.long_entry || ""; $("fLX").value = c.long_exit || ""; $("fSE").value = c.short_entry || ""; $("fSX").value = c.short_exit || "";
   $("fSL").value = c.stop_loss_pct || ""; $("fTP").value = c.take_profit_pct || ""; $("fATR").value = c.atr_stop_mult || "";
   $("fEnabled").checked = !!c.enabled; $("fNotify").checked = c.notify !== false;
-  $("fExec").value = c.execution === "paper" ? "paper" : "signal"; $("fAlloc").value = c.alloc_pct || 10;
+  $("fExec").value = ["paper", "broker"].includes(c.execution) ? c.execution : "signal"; $("fAlloc").value = c.alloc_pct || 10;
   $("oGrid").value = suggestGrid(c.params || {});
   $("formMsg").innerHTML = "";
   store.set("sp.draft", c);
@@ -711,6 +720,8 @@ async function loadStrategies() {
 }
 
 $("saveBtn").onclick = async () => {
+  const c = formToConfig();
+  if (c.execution === "broker" && c.enabled && !confirm(`启用后，「${c.name}」的信号会自动在 Alpaca 账户下单（代码：${c.symbols.join(", ")}）。\n确定吗？`)) return;
   try {
     const saved = await api("/api/strategies", { method: "POST", body: JSON.stringify(formToConfig()) });
     configToForm(saved);
@@ -899,6 +910,43 @@ $("pReset").onclick = async () => {
 $("pProcess").onclick = async () => {
   try { await api("/api/paper/process", { method: "POST" }); } catch (e) { alert(e.message); }
   loadPaper();
+};
+
+// ---------------------------------------------------------------- broker
+let brokerPaused = false;
+async function loadBroker() {
+  let b;
+  try { b = await api("/api/broker"); } catch (e) { $("bStatus").textContent = "无法读取券商状态：" + e.message; return; }
+  brokerPaused = b.paused;
+  $("bPause").textContent = b.paused ? "恢复" : "暂停";
+  const mode = b.mode === "live" ? '<b class="down">实盘（真钱）</b>' : '<b>Alpaca 模拟盘</b>';
+  const lim = b.limits;
+  $("bStatus").innerHTML = !b.configured
+    ? "未配置。在 .env 设置 BROKER=alpaca、ALPACA_KEY_ID、ALPACA_SECRET_KEY 后重启，默认连接 Alpaca 模拟盘。"
+    : `${mode} · ${b.blocked_reason ? `<span class="down">⛔ ${esc(b.blocked_reason)}</span>` : '<span class="up">● 运行中</span>'}<br>
+       限制：单笔 ≤ $${fmt(lim.max_order_notional, 0)} · 每天 ≤ ${lim.max_daily_orders} 单（今天 ${b.orders_today}）· 持仓 ≤ ${lim.max_open_positions} 个 · 做空 ${lim.allow_short ? "允许" : "关闭"}
+       ${b.error ? `<br><span class="down">${esc(b.error)}</span>` : ""}`;
+  $("bMetrics").innerHTML = b.account ? [["账户净值", fmt(+b.account.equity)], ["现金", fmt(+b.account.cash)], ["购买力", fmt(+b.account.buying_power)]]
+    .map(([k, v]) => `<div class="metric"><b>${v}</b><span>${k}</span></div>`).join("") : "";
+  $("bPos").innerHTML = (b.positions || []).map(p => `<tr><td><b>${esc(p.symbol)}</b></td><td class="num">${esc(p.qty)}</td>
+      <td class="num">${fmt(+p.avg_entry_price)}</td><td class="num">${fmt(+p.current_price)}</td>
+      <td class="num">${pctHtml(+p.unrealized_plpc * 100)}<div style="font-size:11px">${fmt(+p.unrealized_pl)}</div></td></tr>`).join("")
+    || `<tr><td colspan="5" class="muted">${b.configured ? "没有持仓" : "—"}</td></tr>`;
+  const ST = { submitted: ["已提交", "up"], rejected: ["未下单", "down"], error: ["失败", "down"], skipped: ["跳过", "muted"] };
+  $("bLog").innerHTML = b.log.slice(0, 20).map(r => `<div class="sig"><b>${esc(r.action)} ${esc(r.symbol)}</b>${r.qty ? " × " + r.qty : ""}
+      <span class="badge ${(ST[r.status] || [])[1] || ""}">${esc((ST[r.status] || [r.status])[0])}</span> <span class="badge">${r.mode === "live" ? "实盘" : "模拟盘"}</span>
+      <div class="muted" style="font-size:11px">${esc(r.strategy || "")} · ${esc(r.detail || "")} · ${esc(new Date(r.created).toLocaleString())}</div></div>`).join("")
+    || '<div class="muted">还没有下单记录</div>';
+}
+$("bPause").onclick = async () => {
+  try { await api("/api/broker/pause", { method: "POST", body: JSON.stringify({ paused: !brokerPaused }) }); } catch (e) { alert(e.message); }
+  loadBroker();
+};
+$("bFlatten").onclick = async () => {
+  if (prompt("会撤销所有挂单、平掉 Alpaca 账户里的全部持仓，并暂停自动交易。\n确认请输入 FLATTEN") !== "FLATTEN") return;
+  try { const r = await api("/api/broker/flatten", { method: "POST", body: JSON.stringify({ confirm: "FLATTEN" }) });
+        alert(r.ok ? `已清仓：${(r.closed || []).join(", ") || "无持仓"}` : "清仓失败：" + r.detail); } catch (e) { alert(e.message); }
+  loadBroker();
 };
 
 // ---------------------------------------------------------------- scanner

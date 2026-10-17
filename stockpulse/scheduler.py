@@ -18,6 +18,7 @@ from .config import Settings
 from .db import Database
 from .pipeline import run_cycle
 from .report import generate_report
+from .broker import BrokerExecutor
 from .realtime import RealtimeMonitor
 from .strategy.alerts import AlertEngine
 from .strategy.paper import PaperAccount
@@ -37,6 +38,7 @@ class Engine:
         self.signals = SignalEngine(self.db, settings)
         self.alerts = AlertEngine(self.db, self.signals.store)
         self.paper = PaperAccount(self.db, self.signals.store, settings)
+        self.broker = BrokerExecutor(self.db, settings)
         self.realtime = RealtimeMonitor(self.db, settings, on_fire=self._realtime_fired)
         self.scheduler = BackgroundScheduler(timezone=settings.timezone)
 
@@ -74,6 +76,10 @@ class Engine:
                 self.notifier.send_signal(sig)
             if sig.get("execution") == "paper":
                 self.paper.submit(sig)
+            elif sig.get("execution") == "broker":
+                rec = self.broker.execute(sig, sig.get("symbols") or [], sig.get("alloc_pct", 10))
+                if tg and rec["status"] in ("submitted", "rejected", "error"):
+                    self.notifier.send_execution(rec)
         # fill pending paper orders / check paper stops on every run
         for ev in self.paper.process():
             if tg:

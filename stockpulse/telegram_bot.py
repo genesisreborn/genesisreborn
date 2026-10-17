@@ -102,6 +102,18 @@ def format_signal(sig: dict) -> str:
     return "\n".join(lines)
 
 
+def format_execution(rec: dict) -> str:
+    icon = {"submitted": "✅", "rejected": "⛔", "error": "❗"}.get(rec["status"], "ℹ️")
+    mode = "实盘" if rec["mode"] == "live" else "Alpaca 模拟盘"
+    head = {"submitted": "已下单", "rejected": "未下单", "error": "下单失败"}.get(rec["status"], rec["status"])
+    lines = [f"{icon} <b>自动交易 · {head}</b>（{mode}）",
+             f"{_e(rec['action'])} {_e(rec['symbol'])}" + (f" × {rec['qty']:g}" if rec.get("qty") else ""),
+             f"策略：{_e(rec.get('strategy') or '')}"]
+    if rec.get("detail"):
+        lines.append(f"说明：{_e(rec['detail'])}")
+    return "\n".join(lines)
+
+
 def format_paper_event(ev: dict) -> str:
     if ev["type"] == "fill":
         extra = "".join([f" · 止损 {ev['stop']}" if ev.get("stop") else "", f" · 止盈 {ev['target']}" if ev.get("target") else ""])
@@ -182,6 +194,9 @@ class TelegramNotifier:
         owners = [str(c) for c in self.settings.telegram_chat_ids]
         return sum(self.send(c, text) for c in owners) if owners else self.broadcast(text)
 
+    def send_execution(self, rec: dict) -> int:
+        return self.notify_owners(format_execution(rec))
+
     def send_paper_event(self, ev: dict) -> int:
         return self.notify_owners(format_paper_event(ev))
 
@@ -214,7 +229,7 @@ class TelegramNotifier:
         if cmd in ("/start", "/subscribe"):
             self.db.add_subscriber(chat_id)
             return ("✅ 已订阅 StockPulse！你会收到每日热门股简报和盘中异动提醒。\n\n"
-                    "/report 最新 AI 报告\n/signals 最近交易信号\n/alerts 生效中的提醒\n/account 模拟账户\n/top 实时热门榜\n/stock TSLA 查看个股\n/stop 取消订阅")
+                    "/report 最新 AI 报告\n/signals 最近交易信号\n/alerts 生效中的提醒\n/account 模拟账户\n/pause /resume 暂停/恢复券商自动交易\n/top 实时热门榜\n/stock TSLA 查看个股\n/stop 取消订阅")
         if cmd in ("/stop", "/unsubscribe"):
             self.db.remove_subscriber(chat_id)
             return "已取消订阅。发送 /start 可重新订阅。"
@@ -229,6 +244,11 @@ class TelegramNotifier:
                 return "还没有交易信号。在网页的「策略」页启用策略后，新信号会自动推送。"
             return "<b>最近的策略信号</b>\n" + "\n".join(
                 f"• {_e(describe_signal(s))} · {_e(s['strategy'])} · {_e(s['interval'])}" for s in sigs)
+        if cmd in ("/pause", "/resume"):
+            if not self.is_owner(chat_id):
+                return "只有 TELEGRAM_CHAT_IDS 里配置的管理员可以控制自动交易。"
+            self.db.set_kv("broker_paused", "1" if cmd == "/pause" else "0")
+            return "⏸ 自动交易已暂停，不会再向券商下新单。发送 /resume 恢复。" if cmd == "/pause" else "▶️ 自动交易已恢复。"
         if cmd == "/account":
             if self.settings.telegram_chat_ids and not self.is_owner(chat_id):
                 return "只有管理员可以查看账户。"
@@ -259,7 +279,7 @@ class TelegramNotifier:
                 if r["ticker"] == t:
                     return format_stock_detail(r)
             return f"{_e(t)} 目前不在热门榜/关注列表中。"
-        return "可用命令：/start /report /signals /alerts /account /top /stock TICKER /stop"
+        return "可用命令：/start /report /signals /alerts /account /pause /resume /top /stock TICKER /stop"
 
     def poll_forever(self) -> None:
         if not self.settings.telegram_enabled:

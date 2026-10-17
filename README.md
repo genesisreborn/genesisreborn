@@ -84,7 +84,29 @@
 - 有 `MASSIVE_API_KEY` 时用 Massive WebSocket 秒级推送；否则每 `REALTIME_POLL_SECONDS` 秒轮询一次最新价（Yahoo 或 Massive REST）。
 - “每根 K 线都提醒”的实时提醒触发后 15 分钟内不重复。
 
-> 系统只给信号、提醒和模拟成交，不会在真实券商账户下单。
+**券商自动下单（Alpaca，可选，默认关闭）**
+
+把策略的“信号出现时”设为“⚠ 券商自动下单（Alpaca）”并启用实时信号后，信号会自动发到你的 Alpaca 账户。
+
+开启步骤：
+1. 在 [Alpaca](https://alpaca.markets) 注册，先在 **Paper Trading**（模拟盘）里生成 API Key。
+2. `.env` 填 `BROKER=alpaca`、`ALPACA_KEY_ID`、`ALPACA_SECRET_KEY`，保持 `ALPACA_PAPER=true`，并确认已设置 `API_TOKEN`，然后重启。
+3. 「账户」页的“券商自动交易”区块显示“运行中”即可。先在模拟盘跑一段时间。
+4. 真要用真钱：换成实盘 Key，设 `ALPACA_PAPER=false`，**并且**设 `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY`。少了最后这一行，实盘模式会拒绝所有下单。
+
+保护措施（全部通过才会下单）：
+- 只交易策略里列出的代码；单笔金额 ≤ `MAX_ORDER_NOTIONAL`（默认 $1000，再乘以“每笔占账户 %”取较小值）；每天开仓 ≤ `MAX_DAILY_ORDERS`；同时持仓 ≤ `MAX_OPEN_POSITIONS`；默认不做空。
+- 必须设置 `API_TOKEN`，否则自动交易保持关闭（防止别人通过网页改策略）。
+- 同一个信号只会下一次单（本地记录 + 券商端 `client_order_id` 双重去重）。
+- 开多时如果策略有止损，会一起挂一张券商端止损单（OTO），即使本程序停了也有保护。
+- 一键暂停：网页「账户」页“暂停”，或 Telegram 发 `/pause`（`/resume` 恢复，仅 `TELEGRAM_CHAT_IDS` 里的管理员可用）。
+- 紧急清仓：网页“紧急清仓”（需输入 FLATTEN），撤销所有挂单、平掉全部持仓并暂停。
+- 每笔下单/拒绝/失败都记录在「账户」页，并推送给管理员。
+
+注意：
+- 市价单在盘外提交时会排到下一个交易时段开盘执行；日线策略的信号在美东 16:15 后产生，所以通常是次日开盘成交，和回测假设一致。
+- 平仓（SELL/COVER）会平掉该代码在 Alpaca 账户里的**全部**持仓。同一个代码不要同时被多个券商策略交易，也不要和手动交易混用。
+- 程序只根据你设定的规则下单，不保证盈利。实盘前请先用模拟账户和 Alpaca 模拟盘验证。
 
 ## 工作原理（热门雷达）
 
@@ -217,6 +239,7 @@ cp .env.example .env && docker compose up -d --build
 | `POST /api/optimize` | 参数优化：`{"strategy": {...}, "symbol", "grid": {"fast": "5:30:5"}, "mode": "walk_forward"/"split", "objective"}` |
 | `GET /api/paper`、`POST /api/paper/reset`、`POST /api/paper/process` | 模拟账户 |
 | `GET /api/realtime` | 盘中实时监控状态 |
+| `GET /api/broker`、`POST /api/broker/pause`、`POST /api/broker/flatten` | 券商状态 / 暂停或恢复 / 紧急清仓（需 `{"confirm": "FLATTEN"}`） |
 
 设置 `API_TOKEN` 后，所有写操作（生成报告、保存/删除策略、修改自选、立即检查）都要带 `Authorization: Bearer <token>`；网页第一次遇到时会提示输入并记住。
 
@@ -246,6 +269,7 @@ stockpulse/
   strategy/         策略：dsl.py 规则语言、presets.py 模板、backtest.py 回测、signals.py 实时信号、
                     scanner.py 多代码扫描、alerts.py 条件提醒、optimize.py 参数优化、paper.py 模拟账户
   realtime.py       盘中实时价格提醒（WebSocket / 轮询）
+  broker.py         Alpaca 下单与风控闸门
   telegram_bot.py   推送与机器人命令
   scheduler.py      定时任务
   web/              FastAPI；static/index.html 热门雷达，static/chart.html 图表策略页，trading.py 图表/策略 API

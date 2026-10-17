@@ -289,6 +289,22 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
     def paper_process(_=require_token):
         return {"events": engine.paper.process()}
 
+    # ---------------------------------------------------------------- broker (Alpaca)
+    @r.get("/broker")
+    def broker_status():
+        return engine.broker.status()
+
+    @r.post("/broker/pause")
+    def broker_pause(body: dict[str, Any] = Body(...), _=require_token):
+        engine.broker.set_paused(bool(body.get("paused", True)))
+        return {"paused": engine.broker.paused}
+
+    @r.post("/broker/flatten")
+    def broker_flatten(body: dict[str, Any] = Body(...), _=require_token):
+        if body.get("confirm") != "FLATTEN":
+            raise HTTPException(400, '需要 {"confirm": "FLATTEN"} 才会清仓')
+        return engine.broker.flatten_all()
+
     # ---------------------------------------------------------------- realtime
     @r.get("/realtime")
     def realtime_status():

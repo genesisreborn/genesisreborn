@@ -54,6 +54,17 @@ class Settings:
 
     # ---- paper trading / real-time alerts ----
     paper_capital: float = field(default_factory=lambda: float(os.getenv("PAPER_CAPITAL", "100000")))
+
+    # ---- broker (Alpaca) auto-trading: off unless BROKER=alpaca ----
+    broker: str = field(default_factory=lambda: os.getenv("BROKER", "").strip().lower())       # "" | "alpaca"
+    alpaca_key_id: str = field(default_factory=lambda: os.getenv("ALPACA_KEY_ID", ""))
+    alpaca_secret_key: str = field(default_factory=lambda: os.getenv("ALPACA_SECRET_KEY", ""))
+    alpaca_paper: bool = field(default_factory=lambda: _bool("ALPACA_PAPER", True))
+    live_trading_confirm: str = field(default_factory=lambda: os.getenv("LIVE_TRADING_CONFIRM", ""))
+    max_order_notional: float = field(default_factory=lambda: float(os.getenv("MAX_ORDER_NOTIONAL", "1000")))
+    max_daily_orders: int = field(default_factory=lambda: int(os.getenv("MAX_DAILY_ORDERS", "10")))
+    max_open_positions: int = field(default_factory=lambda: int(os.getenv("MAX_OPEN_POSITIONS", "5")))
+    allow_short: bool = field(default_factory=lambda: _bool("ALLOW_SHORT", False))
     realtime_mode: str = field(default_factory=lambda: os.getenv("REALTIME_MODE", "auto").strip().lower())  # auto|ws|poll|off
     realtime_poll_seconds: int = field(default_factory=lambda: int(os.getenv("REALTIME_POLL_SECONDS", "20")))
     massive_ws_url: str = field(default_factory=lambda: os.getenv("MASSIVE_WS_URL", "wss://socket.massive.com/stocks"))
