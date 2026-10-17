@@ -99,19 +99,19 @@ def _combos(grid: dict[str, list[float]]) -> list[dict[str, float]]:
     return [dict(zip(names, vals)) for vals in itertools.product(*(grid[n] for n in names))]
 
 
-def _run_all(df: pd.DataFrame, cfg: StrategyConfig, combos: list[dict], costs: tuple[float, float]):
+def _run_all(df: pd.DataFrame, cfg: StrategyConfig, combos: list[dict], costs: tuple[float, float], refs=None):
     """One full-history backtest per combo; windows are measured from the same run."""
     out = []
     for params in combos:
         c = replace(cfg, params={**cfg.params, **params})
-        res = run_backtest(df, c, *costs)
+        res = run_backtest(df, c, *costs, refs=refs)
         out.append((params, res))
     return out
 
 
 def optimize(df: pd.DataFrame, cfg: StrategyConfig, grid_spec: dict, mode: str = "split", objective: str = "sharpe",
              train_pct: float = 70, folds: int = 4, min_trades: int = 3,
-             commission_bps: float = 5, slippage_bps: float = 5) -> dict:
+             commission_bps: float = 5, slippage_bps: float = 5, refs: dict | None = None) -> dict:
     if objective not in OBJECTIVES:
         raise OptimizeError(f"优化目标必须是 {', '.join(OBJECTIVES)} 之一")
     if len(df) < 150:
@@ -121,7 +121,7 @@ def optimize(df: pd.DataFrame, cfg: StrategyConfig, grid_spec: dict, mode: str =
         if name not in cfg.params:
             raise OptimizeError(f"参数 {name!r} 不在策略参数里（策略参数：{', '.join(cfg.params) or '无'}）")
     combos = _combos(grid)
-    runs = _run_all(df, cfg, combos, (commission_bps, slippage_bps))
+    runs = _run_all(df, cfg, combos, (commission_bps, slippage_bps), refs)
     idx = df.index
     iv = cfg.interval
 

@@ -22,6 +22,7 @@ import httpx
 
 from .config import Settings
 from .db import Database, iso, utcnow
+from .strategy.backtest import position_size
 
 log = logging.getLogger(__name__)
 
@@ -188,7 +189,9 @@ class BrokerExecutor:
                 return self._log(sig, "rejected", detail="券商账户被限制交易")
             equity = float(acct.get("equity") or 0)
             price = float(sig["price"])
-            notional = min(equity * alloc_pct / 100, s.max_order_notional)
+            # risk-based size when the strategy asks for it (needs a stop), always within the caps
+            sized = position_size(equity, price, sig.get("stop"), float(sig.get("risk_pct") or 0), alloc_pct) * price
+            notional = min(sized, s.max_order_notional)
             qty = int(math.floor(notional / price)) if price > 0 else 0
             if qty < 1:
                 return self._log(sig, "rejected", detail=f"金额 {notional:.0f} 不够买 1 股（价格 {price}）")

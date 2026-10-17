@@ -13,6 +13,7 @@ from ..db import Database
 from ..market_data import BarStore, closed_bars
 from . import StrategyConfig
 from .backtest import ACTION_ZH, REASON_ZH, run_backtest
+from .refs import load_refs
 
 log = logging.getLogger(__name__)
 
@@ -40,12 +41,12 @@ def reference_levels(df: pd.DataFrame, cfg: StrategyConfig, action: str) -> dict
     return out
 
 
-def evaluate(cfg: StrategyConfig, df: pd.DataFrame, now: datetime | None = None) -> dict:
+def evaluate(cfg: StrategyConfig, df: pd.DataFrame, now: datetime | None = None, refs: dict | None = None) -> dict:
     """Run the strategy over closed bars; return state and the signals produced by the last closed bar."""
     bars = closed_bars(df, cfg.interval, now)
     if len(bars) < 2:
         return {"bars": len(bars), "signals": [], "position": 0}
-    res = run_backtest(bars, cfg)
+    res = run_backtest(bars, cfg, refs=refs)
     last_ts = bars.index[-1]
     last_close = float(bars["close"].iloc[-1])
     signals = []
@@ -83,6 +84,7 @@ class SignalEngine:
         updated: set[tuple[str, str]] = set()
         new: list[dict] = []
         for cfg in self.strategies():
+            refs = load_refs(self.store, cfg, HISTORY_BARS, update)
             for sym in cfg.symbols:
                 key = (sym, cfg.interval)
                 if update and key not in updated:
@@ -90,7 +92,7 @@ class SignalEngine:
                     updated.add(key)
                 df = self.store.get(sym, cfg.interval, HISTORY_BARS, refresh_if_empty=not update)
                 try:
-                    state = evaluate(cfg, df, now)
+                    state = evaluate(cfg, df, now, refs)
                 except Exception as exc:  # noqa: BLE001 - one bad strategy must not stop the rest
                     log.warning("strategy %s on %s failed: %s", cfg.name, sym, exc)
                     continue
@@ -100,7 +102,7 @@ class SignalEngine:
                     sid = self.db.add_signal(sig)
                     if sid:
                         new.append({**sig, "id": sid, "notify": cfg.notify, "execution": cfg.execution,
-                                    "alloc_pct": cfg.alloc_pct, "symbols": cfg.symbols})
+                                    "alloc_pct": cfg.alloc_pct, "risk_pct": cfg.risk_pct, "symbols": cfg.symbols})
         if new:
             log.info("new signals: %s", [(s["symbol"], s["action"], s["strategy"]) for s in new])
         return new
@@ -109,12 +111,13 @@ class SignalEngine:
         """Current simulated position of every enabled strategy x symbol (no data fetch)."""
         out = []
         for cfg in self.strategies():
+            refs = load_refs(self.store, cfg, HISTORY_BARS, update=False)
             for sym in cfg.symbols:
                 df = self.store.get(sym, cfg.interval, HISTORY_BARS, refresh_if_empty=False)
                 if df.empty:
                     continue
                 try:
-                    st = evaluate(cfg, df, now)
+                    st = evaluate(cfg, df, now, refs)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("positions: %s on %s failed: %s", cfg.name, sym, exc)
                     continue

@@ -4,6 +4,7 @@ Examples::
 
     crossover(ema(close, fast), ema(close, slow)) and rsi(close, 14) < 70
     close > highest(high, 20)[1]               # [n] = value n bars ago
+    ref_close("SPY") > sma(ref_close("SPY"), 200)   # market filter: another symbol, same interval
     supertrend_dir(10, 3) == 1 and volume > sma(volume, 20) * 1.5
 
 Expressions are parsed with ``ast`` and only whitelisted nodes, names and
@@ -73,7 +74,25 @@ def build_functions(df: pd.DataFrame) -> dict[str, Callable[..., Any]]:
     }
 
 
-FUNCTION_NAMES = sorted(build_functions(pd.DataFrame(columns=["open", "high", "low", "close", "volume"])).keys())
+REF_FUNCS = {"ref_open": "open", "ref_high": "high", "ref_low": "low", "ref_close": "close", "ref_volume": "volume"}
+FUNCTION_NAMES = sorted([*build_functions(pd.DataFrame(columns=["open", "high", "low", "close", "volume"])), *REF_FUNCS])
+
+
+def referenced_symbols(*exprs: str) -> set[str]:
+    """Symbols used via ref_close("SPY") etc. in the given expressions."""
+    out: set[str] = set()
+    for e in exprs:
+        if not (e or "").strip():
+            continue
+        try:
+            tree = parse(e)
+        except DSLError:
+            continue
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in REF_FUNCS
+                    and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)):
+                out.add(node.args[0].value.strip().upper())
+    return out
 SERIES_NAMES = ["open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4"]
 
 _BINOPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
@@ -83,9 +102,14 @@ _CMPOPS = {ast.Gt: operator.gt, ast.GtE: operator.ge, ast.Lt: operator.lt, ast.L
 
 
 class Evaluator:
-    def __init__(self, df: pd.DataFrame, params: dict[str, float] | None = None):
+    def __init__(self, df: pd.DataFrame, params: dict[str, float] | None = None,
+                 refs: dict[str, pd.DataFrame] | None = None, strict_refs: bool = True):
+        """``refs``: bars of other symbols (same interval) for ref_*(); missing refs raise
+        unless ``strict_refs`` is False (validation), where the main series stands in."""
         self.df = df
         self.idx = df.index
+        self.refs = {k.upper(): v for k, v in (refs or {}).items()}
+        self.strict_refs = strict_refs
         self.funcs = build_functions(df)
         self.names: dict[str, Any] = {
             "open": df["open"], "high": df["high"], "low": df["low"], "close": df["close"],
@@ -98,6 +122,21 @@ class Evaluator:
             if k in self.names or k in self.funcs:
                 raise DSLError(f"参数名 {k!r} 与内置名称冲突")
             self.names[k] = v
+
+    def _ref(self, node: ast.Call) -> pd.Series:
+        col = REF_FUNCS[node.func.id]
+        if len(node.args) != 1 or not isinstance(node.args[0], ast.Constant) or not isinstance(node.args[0].value, str):
+            raise DSLError(f'{node.func.id}() 需要一个代码字符串，例如 {node.func.id}("SPY")')
+        sym = node.args[0].value.strip().upper()
+        if not sym or len(sym) > 15:
+            raise DSLError("代码格式不对")
+        ref = self.refs.get(sym)
+        if ref is None or ref.empty:
+            if self.strict_refs:
+                raise DSLError(f"缺少 {sym} 的行情数据")
+            return self.df[col]
+        # align on time; forward-fill only from earlier bars, so nothing from the future leaks in
+        return ref[col].astype(float).reindex(self.idx, method="ffill")
 
     def eval(self, expr: str) -> pd.Series:
         tree = parse(expr)
@@ -143,6 +182,8 @@ class Evaluator:
                 result = part if result is None else (result & part)
                 left = right
             return result
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in REF_FUNCS:
+            return self._ref(node)
         if isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name) or node.func.id not in self.funcs:
                 name = getattr(node.func, "id", "?")
@@ -184,4 +225,4 @@ def validate(expr: str, params: dict | None = None) -> None:
     base = np.linspace(100, 120, 60)
     df = pd.DataFrame({"open": base, "high": base + 1, "low": base - 1, "close": base + 0.5,
                        "volume": np.full(60, 1e6)}, index=idx)
-    Evaluator(df, params).eval(expr)
+    Evaluator(df, params, strict_refs=False).eval(expr)

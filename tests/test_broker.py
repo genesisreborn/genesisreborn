@@ -158,3 +158,11 @@ def test_engine_routes_broker_signals_and_api(tmp_path):
         assert c.post("/api/broker/pause", json={"paused": True}, headers=auth).json()["paused"] is True
         assert c.post("/api/broker/flatten", json={}, headers=auth).status_code == 400
         assert c.post("/api/broker/flatten", json={"confirm": "FLATTEN"}, headers=auth).json()["ok"] is True
+
+
+def test_broker_risk_sizing(tmp_path):
+    fake = FakeAlpaca(equity=100_000)
+    ex, s = make(tmp_path, fake, max_order_notional=50_000)
+    # 0.5% of 100k = $500 risk, stop $10 below -> 50 shares ($10k), under the 20% / $50k caps
+    rec = ex.execute(sig(price=200.0, stop=190.0, risk_pct=0.5), ["AAPL"], alloc_pct=20)
+    assert rec["qty"] == 50

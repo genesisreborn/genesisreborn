@@ -47,6 +47,21 @@ PRESETS: dict[str, dict] = {
         short_entry="supertrend_dir(len, mult) == -1 and supertrend_dir(len, mult)[1] == 1",
         short_exit="supertrend_dir(len, mult) == 1",
     ),
+    "rsi2_reversion": dict(
+        name="RSI(2) 回调买入 + 大盘过滤", description="个股和大盘（SPY）都在 200 日均线上方时，RSI(2) 极度超卖买入，收盘站上 5 日线卖出。",
+        params={"oversold": 10},
+        long_entry=('close > sma(close, 200) and rsi(close, 2) < oversold'
+                    ' and ref_close("SPY") > sma(ref_close("SPY"), 200)'),
+        long_exit="close > sma(close, 5)",
+        stop_loss_pct=7, risk_pct=1, alloc_pct=20,
+    ),
+    "donchian_market_filter": dict(
+        name="海龟突破 + 大盘过滤", description="唐奇安突破，但只在 SPY 位于 200 日均线上方时开仓；按每笔 1% 风险定仓位。",
+        params={"entry_len": 20, "exit_len": 10},
+        long_entry='close > highest(high, entry_len)[1] and ref_close("SPY") > sma(ref_close("SPY"), 200)',
+        long_exit="close < lowest(low, exit_len)[1]",
+        atr_stop_mult=2, risk_pct=1, alloc_pct=20,
+    ),
     "momentum_pullback": dict(
         name="强势股回踩", description="多头排列（20>50>200 日均线）中回踩 20 日线后重新站上时做多。",
         params={},

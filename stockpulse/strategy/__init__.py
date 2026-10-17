@@ -29,6 +29,8 @@ class StrategyConfig:
     notify: bool = True              # push live signals to Telegram
     execution: str = "signal"        # signal: notify only | paper: simulated account | broker: Alpaca orders
     alloc_pct: float = 10.0          # % of account equity per position (paper / broker, broker also capped)
+    risk_pct: float = 0.0            # >0: size so a stop-out loses ~this % of equity (needs a stop); position_pct /
+                                     # alloc_pct then act as the maximum position size
     id: int | None = None
     preset: str | None = None
 
@@ -46,7 +48,7 @@ class StrategyConfig:
         self.name = (self.name or "").strip()[:80]
         self.symbols = sorted({s.strip().upper() for s in self.symbols if s and s.strip()})
         self.params = {str(k): float(v) for k, v in (self.params or {}).items()}
-        for attr in ("stop_loss_pct", "take_profit_pct", "atr_stop_mult", "position_pct", "alloc_pct"):
+        for attr in ("stop_loss_pct", "take_profit_pct", "atr_stop_mult", "position_pct", "alloc_pct", "risk_pct"):
             setattr(self, attr, float(getattr(self, attr) or 0))
 
     def validate(self) -> list[str]:
@@ -71,6 +73,10 @@ class StrategyConfig:
             errors.append("券商自动下单必须列出允许交易的代码")
         if not 0 < self.alloc_pct <= 100:
             errors.append("每笔资金占比需在 0-100 之间")
+        if not 0 <= self.risk_pct <= 10:
+            errors.append("单笔风险需在 0-10% 之间")
+        if self.risk_pct > 0 and not (self.stop_loss_pct > 0 or self.atr_stop_mult > 0):
+            errors.append("按风险定仓位需要设置止损（止损 % 或 ATR 倍数）")
         for label, expr in (("做多开仓", self.long_entry), ("做多平仓", self.long_exit),
                             ("做空开仓", self.short_entry), ("做空平仓", self.short_exit)):
             if expr.strip():

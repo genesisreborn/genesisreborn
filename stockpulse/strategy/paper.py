@@ -19,6 +19,7 @@ from ..config import Settings
 from ..db import Database, iso, utcnow
 from ..market_data import BarStore, closed_bars
 from . import StrategyConfig
+from .backtest import position_size
 
 log = logging.getLogger(__name__)
 
@@ -171,18 +172,19 @@ class PaperAccount:
         if pos is not None:
             return self._reject(o, "已有持仓")
         cfg = self._cfg(o["strategy_id"])
-        alloc = (cfg.alloc_pct if cfg else 10) / 100
+        d = 1 if o["action"] == "BUY" else -1
+        stop, target = self._levels(cfg, px, d, history)
         eq = self.equity()
-        notional = eq * alloc
+        qty = position_size(eq, px, stop, cfg.risk_pct if cfg else 0, cfg.alloc_pct if cfg else 10)
+        notional = qty * px
         if o["action"] == "BUY":
             notional = min(notional, self.cash / (1 + fee))
         if notional <= 1:
             return self._reject(o, "现金不足")
         qty = notional / px
-        signed = qty if o["action"] == "BUY" else -qty
+        signed = qty * d
         cash = self.cash - signed * px - abs(qty) * px * fee
         self._set_cash(cash)
-        stop, target = self._levels(cfg, px, 1 if signed > 0 else -1, history)
         with self.db.tx() as c:
             c.execute("INSERT INTO paper_positions(strategy_id, strategy, symbol, interval, qty, entry_price, entry_ts,"
                       " stop, target, checked_ts) VALUES (?,?,?,?,?,?,?,?,?,?)",

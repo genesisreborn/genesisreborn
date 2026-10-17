@@ -16,6 +16,7 @@ from ..strategy.dsl import FUNCTION_NAMES, SERIES_NAMES, DSLError
 from ..strategy.presets import PRESETS
 from ..strategy.alerts import Alert
 from ..strategy.optimize import OBJECTIVES, OptimizeError, optimize
+from ..strategy.refs import load_refs
 from ..strategy.scanner import MAX_SYMBOLS, scan
 from ..strategy.signals import SignalEngine
 
@@ -223,7 +224,8 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
             raise HTTPException(400, "请指定回测代码")
         df = closed_bars(load(symbol, cfg.interval, int(body.get("limit") or 2000)), cfg.interval)
         try:
-            res = run_backtest(df, cfg, settings.commission_bps, settings.slippage_bps)
+            res = run_backtest(df, cfg, settings.commission_bps, settings.slippage_bps,
+                               refs=load_refs(store, cfg, MAX_BARS))
         except DSLError as exc:
             raise HTTPException(400, {"errors": [str(exc)]}) from exc
         return {"symbol": symbol, "interval": cfg.interval, "costs_bps": {"commission": settings.commission_bps,
@@ -270,7 +272,8 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
             out = optimize(df, cfg, body.get("grid") or {}, mode=body.get("mode", "split"),
                            objective=body.get("objective", "sharpe"), train_pct=float(body.get("train_pct", 70)),
                            folds=int(body.get("folds", 4)), min_trades=int(body.get("min_trades", 3)),
-                           commission_bps=settings.commission_bps, slippage_bps=settings.slippage_bps)
+                           commission_bps=settings.commission_bps, slippage_bps=settings.slippage_bps,
+                           refs=load_refs(store, cfg, MAX_BARS))
         except (OptimizeError, DSLError) as exc:
             raise HTTPException(400, {"errors": [str(exc)]}) from exc
         return {"symbol": symbol, "interval": cfg.interval, "objectives": OBJECTIVES, **out}

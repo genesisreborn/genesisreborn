@@ -41,8 +41,19 @@
 - 行情变量：`open high low close volume hl2 hlc3 ohlc4`；`close[1]` 是前一根 K 线的值。
 - 函数：`sma ema wma rsi macd macd_signal macd_hist bb_upper bb_mid bb_lower stoch_k stoch_d atr vwap supertrend supertrend_dir obv highest lowest crossover crossunder prev change rising falling abs max min`。
 - 运算：`and or not`、比较、加减乘除。表达式在服务器上用白名单解析，不能执行任意代码。
+- **引用其他代码**（同周期）：`ref_close("SPY")`、`ref_high/ref_low/ref_open/ref_volume`。最常用的是大盘过滤：`ref_close("SPY") > sma(ref_close("SPY"), 200)`，只在大盘处于长期上升趋势时开仓。
+- **按风险定仓位**：填“单笔风险 %”（例如 1），系统按“碰到止损约亏账户 1%”自动算股数（需要设止损），“每笔占账户 %”变成仓位上限。回测、模拟账户和券商下单都按这个算。
 - 风控：止损 %、止盈 %、ATR 倍数止损；可选做空规则（多空反手）。
-- 内置 7 个模板可直接改：均线金叉、RSI 超卖反弹、MACD 趋势、唐奇安突破（海龟）、布林带放量突破、SuperTrend 多空、强势股回踩。
+- 内置 9 个模板可直接改：均线金叉、RSI 超卖反弹、MACD 趋势、唐奇安突破（海龟）、海龟突破 + 大盘过滤、RSI(2) 回调买入 + 大盘过滤、布林带放量突破、SuperTrend 多空、强势股回踩。
+
+**稳健性验证报告**
+
+```bash
+python -m stockpulse validate                                  # 默认 4 个策略 × 14 只大盘股/ETF
+python -m stockpulse validate --symbols SPY,QQQ,AAPL --strategies donchian_breakout,rsi2_reversion
+```
+
+对每个策略 × 每个代码回测全部历史，并单独统计最后 30% 的样本外表现；汇总盈利代码占比、跑赢买入持有占比、回撤是否更小。报告保存到 `data/reports/validation_日期.md`。为了公平比较信号质量，报告里每笔都按全仓计算。
 
 **回测**
 - 在当前图表的代码和周期上回测，结果显示在图表下方：总收益、买入持有对比、年化、最大回撤、夏普、索提诺、胜率、盈亏比、交易明细、净值曲线；买卖点标在 K 线上。

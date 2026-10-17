@@ -252,7 +252,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
         </div>
         <div class="row">
           <div class="field"><label>信号出现时</label><select id="fExec"><option value="signal">只通知</option><option value="paper">同时在模拟账户下单</option><option value="broker">⚠ 券商自动下单（Alpaca）</option></select></div>
-          <div class="field"><label>每笔占账户 %</label><input id="fAlloc" type="number" min="1" max="100" step="1" value="10"></div>
+          <div class="field"><label>每笔占账户 %（上限）</label><input id="fAlloc" type="number" min="1" max="100" step="1" value="10"></div>
+          <div class="field"><label>单笔风险 %（可选）</label><input id="fRisk" type="number" min="0" max="10" step="0.25" placeholder="如 1"></div>
         </div>
         <div class="row" style="justify-content:flex-start">
           <label class="toggle" style="flex:0 0 auto"><input type="checkbox" id="fEnabled"> 启用实时信号</label>
@@ -286,6 +287,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
           <div style="font-size:12px;margin-top:6px">
             <p>写法类似 Pine Script：每条规则是一个返回真/假的表达式，在每根 K 线<b>收盘</b>时计算，信号在<b>下一根 K 线开盘</b>执行。</p>
             <p>行情：<code>open high low close volume hl2 hlc3 ohlc4</code></p>
+            <p>引用其他代码（同周期）：<code>ref_close("SPY")</code>、<code>ref_high/ref_low/ref_open/ref_volume</code>，例如大盘过滤 <code>ref_close("SPY") &gt; sma(ref_close("SPY"), 200)</code></p>
+            <p>单笔风险 %：填了就按“碰到止损约亏账户的这个比例”自动算股数（需要设止损），“每笔占账户 %”变成上限。</p>
             <p>运算：<code>and or not</code>、<code>&gt; &lt; &gt;= &lt;= == !=</code>、<code>+ - * /</code>；<code>close[1]</code> 表示前一根 K 线的值。</p>
             <p>函数：<span id="fnList"></span></p>
             <p>示例：<br><code>crossover(ema(close, 12), ema(close, 26)) and rsi(close, 14) &lt; 70</code><br>
@@ -664,7 +667,7 @@ function formToConfig() {
     params, long_entry: $("fLE").value, long_exit: $("fLX").value, short_entry: $("fSE").value, short_exit: $("fSX").value,
     stop_loss_pct: Number($("fSL").value || 0), take_profit_pct: Number($("fTP").value || 0), atr_stop_mult: Number($("fATR").value || 0),
     enabled: $("fEnabled").checked, notify: $("fNotify").checked, preset: $("presetSel").value || null,
-    execution: $("fExec").value, alloc_pct: Number($("fAlloc").value || 10),
+    execution: $("fExec").value, alloc_pct: Number($("fAlloc").value || 10), risk_pct: Number($("fRisk").value || 0),
   };
 }
 function configToForm(c) {
@@ -676,7 +679,7 @@ function configToForm(c) {
   $("fLE").value = c.long_entry || ""; $("fLX").value = c.long_exit || ""; $("fSE").value = c.short_entry || ""; $("fSX").value = c.short_exit || "";
   $("fSL").value = c.stop_loss_pct || ""; $("fTP").value = c.take_profit_pct || ""; $("fATR").value = c.atr_stop_mult || "";
   $("fEnabled").checked = !!c.enabled; $("fNotify").checked = c.notify !== false;
-  $("fExec").value = ["paper", "broker"].includes(c.execution) ? c.execution : "signal"; $("fAlloc").value = c.alloc_pct || 10;
+  $("fExec").value = ["paper", "broker"].includes(c.execution) ? c.execution : "signal"; $("fAlloc").value = c.alloc_pct || 10; $("fRisk").value = c.risk_pct || "";
   $("oGrid").value = suggestGrid(c.params || {});
   $("formMsg").innerHTML = "";
   store.set("sp.draft", c);

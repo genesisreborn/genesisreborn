@@ -209,3 +209,69 @@ def test_advanced_api(tmp_path):
 
         bad = preset("ema_cross", execution="broker").to_dict()  # broker needs symbols
         assert c.post("/api/strategies/validate", json=bad).json()["ok"] is False
+
+
+# ---------------------------------------------------------------- refs & risk sizing
+def test_ref_functions_align_and_validate():
+    from stockpulse.strategy.dsl import DSLError, Evaluator, referenced_symbols, validate
+
+    idx = pd.date_range("2026-01-01", periods=5, freq="D", tz="UTC")
+    main = pd.DataFrame({"open": 1.0, "high": 1.0, "low": 1.0, "close": [1, 2, 3, 4, 5], "volume": 1.0}, index=idx)
+    spy = pd.DataFrame({"open": 1.0, "high": 1.0, "low": 1.0, "close": [10.0, 30.0], "volume": 1.0}, index=idx[[0, 2]])
+    ev = Evaluator(main, refs={"spy": spy})
+    assert ev.eval_value('ref_close("SPY")').tolist() == [10, 10, 30, 30, 30]       # forward-filled, never from the future
+    assert ev.eval('ref_close("SPY") > 20').tolist() == [False, False, True, True, True]
+    with pytest.raises(DSLError, match="缺少 QQQ"):
+        Evaluator(main).eval('ref_close("QQQ") > 0')
+    with pytest.raises(DSLError, match="代码字符串"):
+        validate("ref_close(close) > 0")
+    validate('close > sma(ref_close("SPY"), 200)')                                    # validation needs no data
+    assert referenced_symbols('ref_close("spy") > 1', 'ref_high("QQQ") > 1', "") == {"SPY", "QQQ"}
+
+
+def test_market_filter_blocks_entries(tmp_path):
+    from stockpulse.strategy.backtest import run_backtest
+    from stockpulse.strategy.refs import load_refs
+
+    s = settings(tmp_path)
+    store = BarStore(Database(s.db_path), s)
+    df = store.get("AAPL", "1d", 1500)
+    base = StrategyConfig(name="b", long_entry="close > sma(close, 50)", long_exit="close < sma(close, 50)")
+    filt = StrategyConfig(name="f", long_entry='close > sma(close, 50) and ref_close("SPY") > 1e9',
+                          long_exit="close < sma(close, 50)")
+    refs = load_refs(store, filt, 1500)
+    assert "SPY" in refs and len(refs["SPY"]) > 100
+    assert run_backtest(df, base).metrics["trades"] > 0
+    assert run_backtest(df, filt, refs=refs).metrics["trades"] == 0        # SPY never above 1e9
+
+
+def test_risk_based_position_size():
+    from stockpulse.strategy.backtest import position_size, run_backtest
+
+    assert position_size(10_000, 100, 95, 1, 100) == pytest.approx(20)       # 1% of 10k / $5 risk
+    assert position_size(10_000, 100, 99, 1, 50) == pytest.approx(50)        # capped at 50% of equity
+    assert position_size(10_000, 100, None, 1, 10) == pytest.approx(10)      # no stop -> allocation
+    cfg = StrategyConfig(name="r", long_entry="close > 0", stop_loss_pct=5, risk_pct=1, interval="1d")
+    assert cfg.validate() == []
+    assert StrategyConfig(name="r", long_entry="close > 0", risk_pct=1).validate()   # needs a stop
+    idx = pd.date_range("2026-01-01", periods=4, freq="D", tz="UTC")
+    df = pd.DataFrame({"open": [100.0] * 4, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1.0}, index=idx)
+    res = run_backtest(df, cfg, 0, 0)
+    # 1% risk of 10k with a 5% stop -> $2,000 position = 20 shares
+    assert res.trades[-1].entry_price == 100 and res.equity.iloc[-1] == pytest.approx(10_000)
+    eq_before = res.equity.iloc[1]
+    assert eq_before == pytest.approx(10_000)
+
+
+def test_paper_uses_risk_sizing(tmp_path):
+    s = settings(tmp_path)
+    db = Database(s.db_path)
+    store = BarStore(db, s)
+    acct = PaperAccount(db, store, s)
+    sid = db.save_strategy(StrategyConfig(name="r", long_entry="close>0", interval="1d", symbols=["CCC"],
+                                          stop_loss_pct=5, risk_pct=1, alloc_pct=50, execution="paper").to_dict())
+    idx = _bars(store, "CCC", [(100, 101, 99, 100), (100, 101, 99, 100)])
+    acct.submit({"id": 1, "strategy_id": sid, "strategy": "r", "symbol": "CCC", "interval": "1d", "action": "BUY",
+                 "reason": "signal", "bar_ts": int(idx[0].timestamp()), "price": 100})
+    acct.process(now=idx[-1].to_pydatetime() + timedelta(days=1), update=False)
+    assert acct.positions()[0]["qty"] == pytest.approx(20)                    # 1% of 10k / (100 - 95)

@@ -9,6 +9,7 @@ from datetime import datetime
 from ..market_data import BarStore, closed_bars
 from . import StrategyConfig
 from .backtest import run_backtest
+from .refs import load_refs
 from .signals import HISTORY_BARS, reference_levels
 
 log = logging.getLogger(__name__)
@@ -17,12 +18,12 @@ MAX_SYMBOLS = 60
 
 
 def _scan_one(store: BarStore, cfg: StrategyConfig, sym: str, commission_bps: float, slippage_bps: float,
-              now: datetime | None) -> dict:
+              now: datetime | None, refs: dict | None = None) -> dict:
     df = store.get(sym, cfg.interval, HISTORY_BARS)
     bars = closed_bars(df, cfg.interval, now)
     if len(bars) < 30:
         return {"symbol": sym, "error": "数据不足"}
-    res = run_backtest(bars, cfg, commission_bps, slippage_bps)
+    res = run_backtest(bars, cfg, commission_bps, slippage_bps, refs=refs)
     m = res.metrics
     close = float(bars["close"].iloc[-1])
     prev = float(bars["close"].iloc[-2])
@@ -46,10 +47,11 @@ def scan(store: BarStore, cfg: StrategyConfig, symbols: list[str], commission_bp
         # Pull data concurrently; providers are I/O bound. The store throttles repeat pulls.
         with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(lambda s: store.maybe_update(s, cfg.interval, min_gap_s=300), symbols))
+    refs = load_refs(store, cfg, HISTORY_BARS, update=fetch)
     rows = []
     for sym in symbols:
         try:
-            rows.append(_scan_one(store, cfg, sym, commission_bps, slippage_bps, now))
+            rows.append(_scan_one(store, cfg, sym, commission_bps, slippage_bps, now, refs))
         except Exception as exc:  # noqa: BLE001 - one bad symbol must not break the scan
             log.warning("scan %s failed: %s", sym, exc)
             rows.append({"symbol": sym, "error": str(exc)[:200]})

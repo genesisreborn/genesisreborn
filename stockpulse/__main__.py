@@ -22,6 +22,10 @@ def main() -> None:
     sub.add_parser("once", help="run one rule-based analysis cycle and print results (no Claude)")
     r = sub.add_parser("report", help="generate an AI report (one Claude call) and send it to Telegram")
     r.add_argument("--no-send", action="store_true", help="only generate and print, do not push to Telegram")
+    v = sub.add_parser("validate", help="robustness report: built-in strategies x a basket of symbols")
+    v.add_argument("--symbols", default="", help="comma separated (default: 14 large caps / ETFs)")
+    v.add_argument("--strategies", default="", help="comma separated preset keys")
+    v.add_argument("--oos", type=float, default=30, help="out-of-sample share of history in %%")
     p.add_argument("--demo", action="store_true", help="offline demo data (no network)")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
@@ -47,6 +51,24 @@ def main() -> None:
 
         snap = Engine(settings).refresh()
         print(format_report(snap, limit=15).replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", ""))
+    elif cmd == "validate":
+        from .db import Database
+        from .market_data import BarStore
+        from .strategy.presets import preset
+        from .strategy.validation import DEFAULT_STRATEGIES, DEFAULT_SYMBOLS, render_validation_markdown, validate_strategies
+
+        syms = [s.strip().upper() for s in args.symbols.split(",") if s.strip()] or DEFAULT_SYMBOLS
+        keys = [s.strip() for s in args.strategies.split(",") if s.strip()] or DEFAULT_STRATEGIES
+        store = BarStore(Database(settings.db_path), settings)
+        rep = validate_strategies(store, [preset(k) for k in keys], syms, args.oos,
+                                  settings.commission_bps, settings.slippage_bps)
+        md = render_validation_markdown(rep)
+        os.makedirs(settings.reports_dir, exist_ok=True)
+        path = os.path.join(settings.reports_dir, f"validation_{rep['generated_at'][:10]}.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(md)
+        print(md)
+        print(f"\n已保存：{path}")
     elif cmd == "report":
         from .scheduler import Engine
 

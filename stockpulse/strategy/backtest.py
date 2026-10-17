@@ -85,8 +85,17 @@ class Result:
         return d
 
 
-def compute_rules(df: pd.DataFrame, cfg: StrategyConfig) -> dict[str, np.ndarray]:
-    ev = Evaluator(df, cfg.params)
+def position_size(equity: float, price: float, stop: float | None, risk_pct: float, max_pct: float) -> float:
+    """Units to buy. With ``risk_pct`` > 0 and a stop, size so that hitting the stop loses about
+    ``risk_pct`` % of equity; never exceed ``max_pct`` % of equity in one position."""
+    cap = equity * max_pct / 100 / price
+    if risk_pct > 0 and stop is not None and abs(price - stop) > 1e-12:
+        return min(equity * risk_pct / 100 / abs(price - stop), cap)
+    return cap
+
+
+def compute_rules(df: pd.DataFrame, cfg: StrategyConfig, refs: dict | None = None) -> dict[str, np.ndarray]:
+    ev = Evaluator(df, cfg.params, refs=refs)
     out = {}
     for key in ("long_entry", "long_exit", "short_entry", "short_exit"):
         expr = getattr(cfg, key).strip()
@@ -95,13 +104,13 @@ def compute_rules(df: pd.DataFrame, cfg: StrategyConfig) -> dict[str, np.ndarray
 
 
 def run_backtest(df: pd.DataFrame, cfg: StrategyConfig, commission_bps: float = 5, slippage_bps: float = 5,
-                 initial_capital: float = 10_000.0) -> Result:
+                 initial_capital: float = 10_000.0, refs: dict | None = None) -> Result:
     res = Result()
     n = len(df)
     if n < 2:
         res.metrics = summarize(res, df, cfg, initial_capital)
         return res
-    rules = compute_rules(df, cfg)
+    rules = compute_rules(df, cfg, refs)
     o, h, l, c = (df[k].to_numpy(dtype=float) for k in ("open", "high", "low", "close"))
     atr = ind.atr(df, 14).to_numpy() if cfg.atr_stop_mult > 0 else None
     times = df.index
@@ -124,9 +133,20 @@ def run_backtest(df: pd.DataFrame, cfg: StrategyConfig, commission_bps: float = 
         buy = action in ("BUY", "COVER")
         px = raw_px * (1 + slip if buy else 1 - slip)
         if action in ("BUY", "SHORT"):
+            d = 1 if action == "BUY" else -1
+            base = atr[i - 1] if atr is not None and i > 0 and not math.isnan(atr[i - 1]) else None
+            sl, tp = cfg.stop_loss_pct / 100, cfg.take_profit_pct / 100
+            stops = []
+            if sl > 0:
+                stops.append(px * (1 - d * sl))
+            if base is not None:
+                stops.append(px - d * cfg.atr_stop_mult * base)
+            stop = (max(stops) if d == 1 else min(stops)) if stops else None
+            target = px * (1 + d * tp) if tp > 0 else None
+
             eq = cash  # flat -> all equity is cash
-            notional = eq * frac
-            qty = notional / px
+            qty = position_size(eq, px, stop, cfg.risk_pct, frac * 100)
+            notional = qty * px
             cash -= notional * fee
             if action == "BUY":
                 cash -= qty * px
@@ -135,16 +155,6 @@ def run_backtest(df: pd.DataFrame, cfg: StrategyConfig, commission_bps: float = 
                 cash += qty * px
                 units, pos = -qty, -1
             entry_px, entry_i = px, i
-            base = atr[i - 1] if atr is not None and i > 0 and not math.isnan(atr[i - 1]) else None
-            sl, tp = cfg.stop_loss_pct / 100, cfg.take_profit_pct / 100
-            d = pos
-            stops = []
-            if sl > 0:
-                stops.append(px * (1 - d * sl))
-            if base is not None:
-                stops.append(px - d * cfg.atr_stop_mult * base)
-            stop = (max(stops) if d == 1 else min(stops)) if stops else None
-            target = px * (1 + d * tp) if tp > 0 else None
             trade = Trade(side="long" if pos == 1 else "short", entry_time=times[i], entry_price=px)
         else:  # SELL / COVER close the position
             cash += units * px
