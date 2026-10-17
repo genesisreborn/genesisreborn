@@ -43,5 +43,14 @@ differently, and extra/early repayments are not modelled (use `/pay` as each ins
    ```
 9. Send `/start` to your bot.
 
+## iPhone app (installable web app)
+The same Worker serves a mobile app: loan progress bars, principal-vs-interest split, payment
+schedule, one-tap "Mark paid", expense entry, category breakdown and budget.
+1. Set two more secrets: `ALLOWED_CHAT_ID` (required) and `APP_PASSCODE` (a long random string).
+2. Open `https://installment-bot.<you>.workers.dev/` in **Safari** on your iPhone, enter the passcode.
+3. Tap Share → **Add to Home Screen**. It now opens full-screen like a native app.
+
+The passcode is stored only on your phone; use a long one (e.g. `openssl rand -base64 24`).
+
 ## Develop
 `npm test` runs the loan-maths and bot tests (Node 22+, no network needed).

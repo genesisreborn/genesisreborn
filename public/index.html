@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Installments">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0e7490">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon.png">
+<title>Installments</title>
+<style>
+:root{--bg:#f3f5f8;--card:#fff;--ink:#0f172a;--mute:#64748b;--line:#e2e8f0;--brand:#0e7490;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--int:#f59e0b}
+@media(prefers-color-scheme:dark){:root{--bg:#0b1220;--card:#131c2e;--ink:#e6edf7;--mute:#8da0ba;--line:#22304a;--brand:#22b8d6}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top) 0 calc(76px + env(safe-area-inset-bottom))}
+header{padding:18px 16px 8px}h1{margin:0;font-size:28px}.sub{color:var(--mute);font-size:14px}
+main{padding:0 16px 70px}.card{background:var(--card);border-radius:16px;padding:14px 16px;margin:12px 0;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}.big{font-size:24px;font-weight:700;white-space:nowrap}.nw{white-space:nowrap}.mute{color:var(--mute);font-size:13px}
+.bar{height:10px;border-radius:6px;background:var(--line);overflow:hidden;margin:10px 0 6px;display:flex}.bar i{display:block;height:100%}
+.pill{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--line)}.late{background:var(--bad);color:#fff}.soon{background:var(--warn);color:#fff}
+button{font:inherit;border:0;border-radius:12px;padding:10px 14px;background:var(--brand);color:#fff;font-weight:600}
+button.ghost{background:var(--line);color:var(--ink)}button.danger{background:transparent;color:var(--bad)}
+.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+.tabs button{flex:1;background:none;color:var(--mute);border-radius:0;padding:12px}.tabs button.on{color:var(--brand)}
+.fab{position:fixed;right:16px;bottom:calc(72px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:28px;font-size:30px;padding:0;box-shadow:0 4px 12px rgba(0,0,0,.3)}
+input,select{font:inherit;width:100%;padding:11px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);margin:4px 0 10px}
+label{font-size:13px;color:var(--mute)}.sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;z-index:5}
+.sheet>div{background:var(--card);width:100%;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}td,th{padding:5px 3px;text-align:right}th:first-child,td:first-child{text-align:left}th{color:var(--mute);font-weight:500}
+.cat{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:14px}.cat b{flex:0 0 90px;font-weight:500;overflow:hidden;text-overflow:ellipsis}.cat .bar{flex:1;margin:0;height:8px}
+.err{color:var(--bad);font-size:14px;min-height:20px}.hidden{display:none}
+</style>
+</head>
+<body>
+<div id="login" class="hidden"><main><header><h1>Installments</h1><div class="sub">Enter your passcode</div></header>
+<div class="card"><input id="pass" type="password" placeholder="Passcode" autocomplete="current-password"><div class="err" id="loginErr"></div><button onclick="login()" style="width:100%">Unlock</button></div></main></div>
+
+<div id="app" class="hidden">
+<header><h1 id="title"></h1><div class="sub" id="subtitle"></div></header>
+<main id="view"></main>
+<button class="fab" id="fab" onclick="openAdd()">+</button>
+<nav class="tabs"><button id="t-loans" onclick="tab('loans')">💳 Loans</button><button id="t-spend" onclick="tab('spend')">🧾 Spending</button><button onclick="logout()">🔒 Lock</button></nav>
+</div>
+<div id="sheet" class="sheet hidden" onclick="if(event.target===this)closeSheet()"><div id="sheetBody"></div></div>
+
+<script>
+var S=null,TAB='loans',KEY='inst_pass';
+function tok(){try{return localStorage.getItem(KEY)||''}catch(e){return ''}}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function $(id){return document.getElementById(id)}
+function m(c){return S.currency+(c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
+async function call(path,body){
+  var r=await fetch(path,{method:body?'POST':'GET',headers:{authorization:'Bearer '+tok(),'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
+  if(r.status===401){logout();throw new Error('unauthorized')}
+  var j=await r.json();if(!r.ok&&!j.state)throw new Error(j.error||'error');return j}
+async function login(){
+  try{localStorage.setItem(KEY,$('pass').value)}catch(e){}
+  try{S=await call('/api/state');$('login').classList.add('hidden');start()}catch(e){$('loginErr').textContent='Wrong passcode or server not configured.'}}
+function logout(){try{localStorage.removeItem(KEY)}catch(e){}$('app').classList.add('hidden');$('login').classList.remove('hidden')}
+async function boot(){
+  if(!tok())return logout();
+  try{S=await call('/api/state');start()}catch(e){}}
+function start(){$('login').classList.add('hidden');$('app').classList.remove('hidden');render()}
+function tab(t){TAB=t;render()}
+async function act(path,body,confirmMsg){
+  if(confirmMsg&&!confirm(confirmMsg))return;
+  try{var j=await call(path,body);if(j.state)S=j.state;if(!j.ok)alert(j.message);closeSheet();render()}catch(e){alert(e.message)}}
+
+function dueBadge(l){if(l.done)return'<span class="pill">Paid off</span>';var d=l.daysUntil;
+  if(d<0)return'<span class="pill late">Overdue '+(-d)+'d</span>';if(d<=3)return'<span class="pill soon">'+(d===0?'Due today':'Due in '+d+'d')+'</span>';return'<span class="pill">In '+d+' days</span>'}
+function loanCard(l){
+  var pct=Math.round(l.paid/l.months*100);
+  var pr=l.principal?Math.max(0,100-l.remainingPrincipal/l.principal*100):0;
+  var totalCost=l.principal+l.totalInterest;
+  return '<div class="card"><div class="row"><b>'+esc(l.name)+'</b>'+dueBadge(l)+'</div>'+
+  (l.done?'':'<div class="row" style="margin-top:6px"><span class="big">'+m(l.nextPayment)+'</span><span class="mute">due '+l.nextDue+'</span></div>')+
+  '<div class="bar"><i style="width:'+pct+'%;background:var(--ok)"></i></div>'+
+  '<div class="row mute"><span>'+l.paid+' of '+l.months+' paid ('+pct+'%)</span><span>'+m(l.remainingTotal)+' left</span></div>'+
+  '<div class="bar" title="cost breakdown"><i style="width:'+(l.principal/totalCost*100)+'%;background:var(--brand)"></i><i style="width:'+(l.totalInterest/totalCost*100)+'%;background:var(--int)"></i></div>'+
+  '<div class="row mute"><span class="nw"><span style="color:var(--brand)">●</span> Principal '+m(l.remainingPrincipal)+'</span><span class="nw"><span style="color:var(--int)">●</span> Interest '+m(l.remainingInterest)+'</span></div>'+
+  '<div class="row" style="margin-top:12px;gap:8px">'+(l.done?'':'<button onclick="act(\'/api/pay\',{id:'+l.id+'})" style="flex:1">✅ Mark paid</button>')+
+  '<button class="ghost" onclick="loanSheet('+l.id+')">Details</button></div></div>'}
+
+function render(){
+  $('t-loans').className=TAB==='loans'?'on':'';$('t-spend').className=TAB==='spend'?'on':'';
+  var v=$('view');
+  if(TAB==='loans'){
+    $('title').textContent='Loans';$('subtitle').textContent=S.loans.length?'Monthly commitment '+m(S.totals.monthly):'No loans yet';
+    var h='<div class="card"><div class="row"><div><div class="mute">Still to pay</div><div class="big">'+m(S.totals.remaining)+'</div></div><div style="text-align:right"><div class="mute">of which interest</div><div class="big" style="color:var(--int)">'+m(S.totals.remainingInterest)+'</div></div></div></div>';
+    h+=S.loans.map(loanCard).join('')||'<div class="card mute">Tap + to add your first installment.</div>';v.innerHTML=h;
+  }else{
+    var sp=S.spend;$('title').textContent='Spending';$('subtitle').textContent='Today '+m(sp.today)+' · This month '+m(sp.month);
+    var h='';
+    if(sp.budget){var p=Math.min(100,sp.month/sp.budget*100);h+='<div class="card"><div class="row"><b>Monthly budget</b><span class="mute">'+m(sp.budget)+'</span></div><div class="bar"><i style="width:'+p+'%;background:'+(sp.month>sp.budget?'var(--bad)':'var(--brand)')+'"></i></div><div class="mute">'+(sp.month>sp.budget?'Over by '+m(sp.month-sp.budget):m(sp.budget-sp.month)+' left')+'</div></div>'}
+    var max=sp.categories.length?sp.categories[0].s:1;
+    h+='<div class="card"><b>This month by category</b>'+(sp.categories.map(function(c){return'<div class="cat"><b>'+esc(c.category)+'</b><div class="bar"><i style="width:'+c.s/max*100+'%;background:var(--brand)"></i></div><span>'+m(c.s)+'</span></div>'}).join('')||'<div class="mute">Nothing yet.</div>')+'</div>';
+    h+='<div class="card"><div class="row"><b>Recent</b><span><button class="ghost" onclick="act(\'/api/undo\',{})">Undo last</button> <button class="ghost" onclick="budgetSheet()">Budget</button></span></div>'+
+      sp.recent.map(function(e){return'<div class="row" style="margin-top:8px"><span>'+esc(e.category)+(e.note?' <span class="mute">'+esc(e.note)+'</span>':'')+'</span><span>'+m(e.amount_cents)+'</span></div>'}).join('')+'</div>';
+    v.innerHTML=h}
+}
+function sheet(h){$('sheetBody').innerHTML=h;$('sheet').classList.remove('hidden')}
+function closeSheet(){$('sheet').classList.add('hidden')}
+function openAdd(){TAB==='loans'?loanForm():expForm()}
+function expForm(){sheet('<h3 style="margin-top:0">Add expense</h3><label>Amount</label><input id="ea" type="number" inputmode="decimal" step="0.01"><label>Category</label><input id="ec" placeholder="food, transport…" list="cats"><datalist id="cats">'+S.spend.categories.map(function(c){return'<option value="'+esc(c.category)+'">'}).join('')+'</datalist><label>Note (optional)</label><input id="en"><button style="width:100%" onclick="act(\'/api/expense\',{amount:$(\'ea\').value,category:$(\'ec\').value,note:$(\'en\').value})">Save</button>');$('ea').focus()}
+function budgetSheet(){sheet('<h3 style="margin-top:0">Monthly budget</h3><input id="ba" type="number" inputmode="decimal"><button style="width:100%" onclick="act(\'/api/budget\',{amount:$(\'ba\').value})">Save</button>')}
+function loanForm(){sheet('<h3 style="margin-top:0">Add installment</h3><label>Name</label><input id="ln"><label>Total amount borrowed</label><input id="la" type="number" inputmode="decimal"><label>Interest rate % per year (0 if none)</label><input id="lr" type="number" inputmode="decimal" value="0"><label>Number of months</label><input id="lm" type="number" inputmode="numeric"><label>Due day of month (1-31)</label><input id="ld" type="number" inputmode="numeric"><label>Payments already made</label><input id="lp" type="number" inputmode="numeric" value="0"><label>Rate type</label><select id="lf"><option value="">Reducing balance</option><option value="1">Flat rate</option></select><button style="width:100%" onclick="act(\'/api/loan\',{name:$(\'ln\').value,amount:$(\'la\').value,rate:$(\'lr\').value,months:$(\'lm\').value,dueDay:$(\'ld\').value,paid:$(\'lp\').value,flat:!!$(\'lf\').value})">Add</button>')}
+function loanSheet(id){var l=S.loans.filter(function(x){return x.id===id})[0];
+  sheet('<h3 style="margin-top:0">'+esc(l.name)+'</h3><div class="mute">'+l.rate+'% '+(l.mode==='flat'?'flat':'reducing')+' · '+l.months+' months · monthly '+m(l.payment)+'</div>'+
+  '<div class="row" style="margin:12px 0"><span>Total interest</span><b>'+m(l.totalInterest)+'</b></div><div class="row"><span>Interest paid so far</span><b>'+m(l.paidInterest)+'</b></div><div class="row"><span>Interest remaining</span><b>'+m(l.remainingInterest)+'</b></div>'+
+  (l.schedule.length?'<table style="margin-top:14px"><tr><th>#</th><th>Due</th><th>Pay</th><th>Interest</th><th>Balance</th></tr>'+l.schedule.map(function(r){return'<tr><td>'+r.n+'</td><td>'+r.due.slice(2)+'</td><td>'+(r.payment/100).toFixed(2)+'</td><td>'+(r.interest/100).toFixed(2)+'</td><td>'+(Math.max(r.balance,0)/100).toFixed(2)+'</td></tr>'}).join('')+'</table>':'')+
+  '<div class="row" style="margin-top:16px"><button class="ghost" onclick="act(\'/api/unpay\',{id:'+id+'})">Undo last payment</button><button class="danger" onclick="act(\'/api/delloan\',{id:'+id+'},\'Delete this loan?\')">Delete</button></div>')}
+boot();
+</script>
+</body>
+</html>

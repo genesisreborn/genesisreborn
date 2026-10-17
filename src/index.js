@@ -1,4 +1,5 @@
 import { handleText, markPaid, buildReminders, recordReminded, reminderText, reminderKeyboard, localToday } from './bot.js';
+import { handleApi } from './api.js';
 import { sendMessage, answerCallback } from './telegram.js';
 
 const allowed = (env, chatId) => !env.ALLOWED_CHAT_ID || String(chatId) === String(env.ALLOWED_CHAT_ID);
@@ -36,7 +37,8 @@ export default {
       ctx.waitUntil(handleUpdate(env, update).catch((e) => console.error('update failed', e)));
       return new Response('ok');
     }
-    return new Response('installment-bot is running');
+    if (url.pathname.startsWith('/api/')) return handleApi(request, env);
+    return new Response('not found', { status: 404 });
   },
 
   async scheduled(event, env) {

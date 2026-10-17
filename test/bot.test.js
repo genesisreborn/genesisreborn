@@ -1,24 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
 import { handleText, buildReminders, recordReminded } from '../src/bot.js';
 
-// Minimal D1 shim over node:sqlite
-function fakeD1() {
-  const db = new DatabaseSync(':memory:');
-  db.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
-  const stmt = (sql, args = []) => ({
-    bind: (...a) => stmt(sql, a),
-    first: async () => db.prepare(sql).get(...args) ?? null,
-    all: async () => ({ results: db.prepare(sql).all(...args) }),
-    run: async () => {
-      const r = db.prepare(sql).run(...args);
-      return { meta: { last_row_id: Number(r.lastInsertRowid), changes: r.changes } };
-    },
-  });
-  return { prepare: (sql) => stmt(sql) };
-}
+import { fakeD1 } from './helpers.js';
 
 const env = () => ({ DB: fakeD1(), CURRENCY: '$', TZ_OFFSET_HOURS: '0' });
 const C = 1;

@@ -2,6 +2,10 @@ name = "installment-bot"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
+[assets]
+directory = "./public"
+run_worker_first = ["/api/*", "/webhook"]
+
 [vars]
 CURRENCY = "MYR "      # shown before amounts
 TZ_OFFSET_HOURS = "8"   # your UTC offset (e.g. 8 for MYT/SGT/PHT, 7 for WIB)
@@ -18,4 +22,5 @@ database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
 # Secrets (set with `wrangler secret put <NAME>`):
 #   BOT_TOKEN        - token from @BotFather
 #   WEBHOOK_SECRET   - any random string, also passed to Telegram's setWebhook
-#   ALLOWED_CHAT_ID  - (optional) your Telegram chat id; other chats are ignored
+#   ALLOWED_CHAT_ID  - your Telegram chat id (required for the iPhone app)
+#   APP_PASSCODE     - long random passcode that unlocks the iPhone app

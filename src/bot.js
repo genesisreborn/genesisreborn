@@ -11,7 +11,7 @@ export function localToday(env, now = Date.now()) {
 export const money = (env, cents) =>
   `${env.CURRENCY ?? '$'}${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const scheduleOf = (l) =>
+export const scheduleOf = (l) =>
   buildSchedule({ principalCents: l.principal_cents, annualRate: l.annual_rate, months: l.months, mode: l.mode });
 
 const rel = (days) =>
