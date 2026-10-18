@@ -61,8 +61,31 @@ a { color: var(--accent); }
 
 .main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; min-height: 0; }
 .left { display: grid; grid-template-rows: minmax(320px, 1fr) auto; min-height: 0; min-width: 0; }
-.chart-wrap { position: relative; min-height: 0; background: var(--chart-bg); }
+.chart-wrap { position: relative; min-height: 0; background: var(--chart-bg); display: grid; grid-template-columns: 40px minmax(0, 1fr); }
+.chart-area { position: relative; min-width: 0; min-height: 0; }
 #chart { position: absolute; inset: 0; }
+#drawCanvas { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 4; }
+.draw-tools { display: flex; flex-direction: column; gap: 2px; padding: 6px 4px; border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; }
+.draw-tools button { width: 32px; height: 30px; padding: 0; border: 0; background: transparent; font-size: 15px; border-radius: 6px; color: var(--text); }
+.draw-tools button:hover { background: var(--panel-2); }
+.draw-tools button.on { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+.draw-tools .sep { height: 1px; background: var(--line); margin: 4px 2px; }
+[hidden] { display: none !important; }
+.draw-props { position: absolute; top: 8px; right: 70px; z-index: 6; display: flex; gap: 6px; align-items: center; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; box-shadow: 0 4px 14px rgba(0,0,0,.18); }
+.draw-props input[type=color] { width: 28px; height: 24px; padding: 0; border: 0; background: none; }
+.draw-list { position: absolute; left: 4px; top: 6px; z-index: 7; width: 260px; max-height: 70%; overflow: auto; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+.replay-bar { position: absolute; left: 50%; transform: translateX(-50%); bottom: 34px; z-index: 6; display: flex; gap: 6px; align-items: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
+.replay-bar input[type=range] { width: 220px; }
+.replay-bar b, .replay-bar button, .replay-bar span { white-space: nowrap; }
+@media (max-width: 700px) { .replay-bar input[type=range] { width: 90px; } .replay-bar { bottom: 28px; padding: 4px 6px; gap: 4px; } }
+.ind-row { display: grid; grid-template-columns: minmax(0, 1fr) 80px 30px 26px; gap: 6px; align-items: center; padding: 4px 2px; }
+.ind-row input[type=color] { width: 28px; height: 24px; padding: 0; border: 0; background: none; }
+#indMenu { min-width: 330px; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--text); }
 .legend { position: absolute; left: 10px; top: 8px; z-index: 3; pointer-events: none; font-size: 12px; line-height: 1.6;
   background: color-mix(in srgb, var(--chart-bg) 80%, transparent); padding: 2px 6px; border-radius: 4px; max-width: calc(100% - 90px); }
 .legend .title { font-weight: 700; font-size: 13px; }
@@ -149,6 +172,15 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
       <button id="indBtn" aria-haspopup="true">指标 ▾</button>
       <div class="menu" id="indMenu"></div>
     </div>
+    <select id="chartType" aria-label="图表类型" title="图表类型">
+      <option value="candles">蜡烛图</option><option value="hollow">空心蜡烛</option><option value="bars">美国线</option>
+      <option value="line">折线</option><option value="area">面积</option><option value="heikin">平均K线</option>
+    </select>
+    <div class="seg" role="group" aria-label="坐标"><button id="scaleLog" title="对数坐标">对数</button><button id="scalePct" title="百分比坐标">%</button></div>
+    <button id="cmpBtn" title="叠加其他代码对比">＋对比</button>
+    <button id="replayBtn" title="K 线回放">⏪ 回放</button>
+    <button id="tableBtn" title="K 线和指标数据表">数据表</button>
+    <button id="screenBtn" title="股票筛选器">筛选器</button>
     <div class="quote"><span class="px" id="qPx">—</span><span id="qChg"></span></div>
     <span class="spacer"></span>
     <span class="badge" id="provider">—</span>
@@ -159,9 +191,25 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   <div class="main">
     <section class="left">
       <div class="chart-wrap">
-        <div id="chart"></div>
-        <div class="legend" id="legend"></div>
-        <div class="chart-msg" id="chartMsg">加载中…</div>
+        <div class="draw-tools" id="drawTools" role="toolbar" aria-label="画线工具"></div>
+        <div class="chart-area" id="chartArea">
+          <div id="chart"></div>
+          <canvas id="drawCanvas"></canvas>
+          <div class="legend" id="legend"></div>
+          <div class="chart-msg" id="chartMsg">加载中…</div>
+          <div class="draw-props" id="drawProps" hidden></div>
+          <div class="draw-list" id="drawList" hidden></div>
+          <div class="replay-bar" id="replayBar" hidden>
+            <b>回放</b>
+            <button id="rpBack" title="后退一根">◀</button>
+            <button id="rpPlay" title="播放/暂停">▶</button>
+            <button id="rpStep" title="前进一根">▶|</button>
+            <select id="rpSpeed" aria-label="速度"><option value="1000">1x</option><option value="400" selected>2x</option><option value="150">5x</option><option value="50">10x</option></select>
+            <input type="range" id="rpSlider" aria-label="回放位置">
+            <span class="muted" id="rpInfo"></span>
+            <button id="rpExit">退出</button>
+          </div>
+        </div>
       </div>
       <div class="bottom" id="bottom">
         <div class="bottom-head">
@@ -194,6 +242,22 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
           </div>
           <div class="row" style="padding:0 12px 12px;justify-content:flex-start"><button class="primary" id="optApply" style="flex:0 0 auto">把推荐参数填进策略</button>
             <span class="muted" style="font-size:11px">样本内选参数、样本外检验；只看样本外结果才不会被过拟合骗。</span></div>
+        </div>
+        <div id="tableView" hidden>
+          <div class="row" style="padding:8px 12px;justify-content:flex-start;gap:8px">
+            <button id="csvBtn" style="flex:0 0 auto">导出 CSV</button>
+            <span class="muted" style="font-size:11px">最近 500 根 K 线（最新在上），包含图上所有指标的数值。</span>
+          </div>
+          <div style="overflow:auto;padding:0 12px 12px"><table id="dataTable"></table></div>
+        </div>
+        <div id="screenView" hidden>
+          <div class="row" style="padding:8px 12px;gap:8px">
+            <input id="scrFilter" style="flex:3" placeholder="筛选条件（规则语法，可留空），如 rsi(close, 14) < 35 and close > sma(close, 200)">
+            <input id="scrSymbols" style="flex:2" placeholder="代码（留空 = 自选 + 热门股）">
+            <button class="primary" id="scrRun" style="flex:0 0 auto">筛选</button>
+          </div>
+          <div class="muted" style="font-size:11px;padding:0 12px" id="scrInfo"></div>
+          <div style="overflow:auto;padding:4px 12px 12px"><table id="scrTable"></table></div>
         </div>
         <div id="scanView" hidden>
           <div class="metrics" id="scanMetrics"></div>
@@ -379,20 +443,33 @@ const store = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? 
                 set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
 
 const INTERVALS = [["1m","1分"],["5m","5分"],["15m","15分"],["1h","1时"],["1d","日"],["1wk","周"]];
-// indicator key -> [label, default args, color slot]. Color follows the indicator, never its position.
-const INDICATORS = [
-  ["ema", "EMA", "20", "--s1"], ["ema2", "EMA (第二条)", "50", "--s2"], ["sma", "SMA", "200", "--s7"],
-  ["bb", "布林带", "20:2", "--s5"], ["vwap", "VWAP", "", "--s4"], ["supertrend", "SuperTrend", "10:3", null],
-  ["donchian", "唐奇安通道", "20", "--s3"], ["rsi", "RSI", "14", "--s7"], ["macd", "MACD", "12:26:9", null],
-  ["stoch", "随机指标 KD", "14:3", null], ["atr", "ATR", "14", "--s2"],
-];
-const SUB_COLORS = { "MACD": "--s1", "Signal": "--s2", "%K": "--s1", "%D": "--s2" };
+// Indicator catalog: type -> [label, default args, default color slot]. Each chart instance keeps its own color.
+const IND_CATALOG = {
+  ema: ["EMA 指数均线", "20", "--s1"], sma: ["SMA 简单均线", "50", "--s2"], wma: ["WMA 加权均线", "20", "--s3"],
+  bb: ["布林带", "20:2", "--s5"], keltner: ["肯特纳通道", "20:2", "--s3"], donchian: ["唐奇安通道", "20", "--s6"],
+  ichimoku: ["一目均衡表", "9:26:52", "--s1"], supertrend: ["SuperTrend", "10:3", "--s1"], psar: ["抛物线 SAR", "0.02:0.2", "--s4"],
+  vwap: ["VWAP", "", "--s4"], volsma: ["成交量均线", "20", "--s4"],
+  rsi: ["RSI", "14", "--s7"], macd: ["MACD", "12:26:9", "--s1"], stoch: ["随机指标 KD", "14:3", "--s1"],
+  stochrsi: ["随机 RSI", "14:3:3", "--s1"], adx: ["ADX / DMI", "14", "--s7"], cci: ["CCI", "20", "--s2"],
+  willr: ["威廉 %R", "14", "--s5"], mfi: ["MFI 资金流量", "14", "--s3"], roc: ["ROC 变动率", "12", "--s1"],
+  atr: ["ATR 真实波幅", "14", "--s2"], obv: ["OBV 能量潮", "", "--s1"],
+};
+const BAND_TYPES = ["bb", "keltner", "donchian"];
+const SUB_SLOTS = ["--s2", "--s4", "--s5", "--s3"];
+const ICHI_COLORS = { "转换线": "--s1", "基准线": "--s8", "先行A": "--s3", "先行B": "--s2" };
 const ACTION = { BUY: ["买入", "up"], SELL: ["卖出", "down"], SHORT: ["卖空", "down"], COVER: ["平空", "up"] };
 const REASON = { signal: "信号", stop: "止损", take_profit: "止盈", reverse: "反手", open: "持仓中" };
 
+function migrateInds(v) {
+  if (Array.isArray(v)) return v;
+  // old format: {ema: "20", ema2: "50", rsi: "14"}
+  return Object.entries(v || {}).map(([k, a], i) => ({ id: "i" + (i + 1), type: k === "ema2" ? "ema" : k, args: a, color: null }));
+}
 const state = {
   symbol: store.get("sp.symbol", "AAPL"), interval: store.get("sp.interval", "1d"),
-  inds: store.get("sp.inds", { ema: "20", ema2: "50", rsi: "14" }),
+  inds: migrateInds(store.get("sp.inds", [{ id: "i1", type: "ema", args: "20" }, { id: "i2", type: "ema", args: "50" }, { id: "i3", type: "rsi", args: "14" }])),
+  chartType: store.get("sp.chartType", "candles"), scale: store.get("sp.scale", "normal"),
+  compares: store.get("sp.compares", []), replay: null,
   backtest: null, editingId: null, meta: null, strategies: [],
 };
 
@@ -419,7 +496,8 @@ async function api(path, opts = {}) {
 }
 
 // ---------------------------------------------------------------- chart
-let chart = null, candles = null, volume = null, markersApi = null, seriesMap = new Map(), lastData = null;
+let chart = null, candles = null, volume = null, markersApi = null, seriesMap = new Map(), lastData = null, fullData = null;
+let compareSeries = new Map(), compareData = new Map();
 
 function timeFmt(t) {
   const d = new Date(t * 1000);
@@ -433,96 +511,169 @@ function chartOptions() {
               panes: { separatorColor: css("--line"), separatorHoverColor: css("--accent") } },
     grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
     rightPriceScale: { borderColor: css("--line") },
-    timeScale: { borderColor: css("--line"), timeVisible: !["1d", "1wk"].includes(state.interval), secondsVisible: false, rightOffset: 6 },
+    timeScale: { borderColor: css("--line"), timeVisible: !["1d", "1wk"].includes(state.interval), secondsVisible: false, rightOffset: 8 },
     crosshair: { mode: LWC.CrosshairMode.Normal },
     localization: { timeFormatter: timeFmt },
   };
 }
 
+function priceScaleMode() {
+  if (state.compares.length || state.scale === "percent") return LWC.PriceScaleMode.Percentage;
+  return state.scale === "log" ? LWC.PriceScaleMode.Logarithmic : LWC.PriceScaleMode.Normal;
+}
+
+function addMainSeries() {
+  const up = css("--up"), dn = css("--down");
+  switch (state.chartType) {
+    case "bars": return chart.addSeries(LWC.BarSeries, { upColor: up, downColor: dn, thinBars: false });
+    case "line": return chart.addSeries(LWC.LineSeries, { color: css("--s1"), lineWidth: 2 });
+    case "area": return chart.addSeries(LWC.AreaSeries, { lineColor: css("--s1"), topColor: css("--s1") + "55", bottomColor: css("--s1") + "05", lineWidth: 2 });
+    case "hollow": return chart.addSeries(LWC.CandlestickSeries, { upColor: "rgba(0,0,0,0)", downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn });
+    default: return chart.addSeries(LWC.CandlestickSeries, { upColor: up, downColor: dn, borderVisible: false, wickUpColor: up, wickDownColor: dn });
+  }
+}
+
 function buildChart() {
   if (chart) chart.remove();
-  seriesMap = new Map();
+  seriesMap = new Map(); compareSeries = new Map();
   chart = LWC.createChart($("chart"), chartOptions());
-  candles = chart.addSeries(LWC.CandlestickSeries, {
-    upColor: css("--up"), downColor: css("--down"), borderVisible: false, wickUpColor: css("--up"), wickDownColor: css("--down"),
-  });
+  candles = addMainSeries();
+  chart.priceScale("right").applyOptions({ mode: priceScaleMode() });
   volume = chart.addSeries(LWC.HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "vol", lastValueVisible: false, priceLineVisible: false });
   chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
   markersApi = LWC.createSeriesMarkers(candles, []);
   chart.subscribeCrosshairMove(updateLegend);
+  if (window.Drawings) Drawings.attach(chart, candles);
+}
+
+function heikinAshi(bars) {
+  const out = [];
+  bars.forEach((b, i) => {
+    const c = (b.open + b.high + b.low + b.close) / 4;
+    const o = i === 0 ? (b.open + b.close) / 2 : (out[i - 1].open + out[i - 1].close) / 2;
+    out.push({ time: b.time, open: o, high: Math.max(b.high, o, c), low: Math.min(b.low, o, c), close: c });
+  });
+  return out;
+}
+
+function mainData(bars) {
+  if (state.chartType === "line" || state.chartType === "area") return bars.map(b => ({ time: b.time, value: b.close }));
+  if (state.chartType === "heikin") return heikinAshi(bars);
+  return bars.map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }));
 }
 
 function indicatorSpecs() {
-  return Object.entries(state.inds).map(([k, args]) => {
-    const key = k === "ema2" ? "ema" : k;
-    return { slot: k, spec: args ? `${key}:${args}` : key };
-  });
+  return state.inds.map(i => `${i.id}=${i.args ? `${i.type}:${i.args}` : i.type}`);
 }
 
-function colorFor(s, slotKey) {
+function seriesColor(s, idxInInstance) {
   if (s.tone === "up") return css("--up");
   if (s.tone === "down") return css("--down");
-  if (SUB_COLORS[s.name]) return css(SUB_COLORS[s.name]);
-  const def = INDICATORS.find(i => i[0] === slotKey);
-  return css((def && def[3]) || "--s1");
+  const inst = state.inds.find(i => i.id === s.uid);
+  const base = inst && inst.color ? inst.color : css((IND_CATALOG[inst ? inst.type : ""] || [])[2] || "--s1");
+  if (ICHI_COLORS[s.name]) return css(ICHI_COLORS[s.name]);
+  if (!inst || idxInInstance === 0 || BAND_TYPES.includes(inst.type)) return base;
+  return css(SUB_SLOTS[(idxInInstance - 1) % SUB_SLOTS.length]);
+}
+
+function sliceForReplay(data) {
+  if (!state.replay) return data;
+  const cut = data.bars[Math.min(state.replay.idx, data.bars.length - 1)].time;
+  return { ...data, bars: data.bars.filter(b => b.time <= cut),
+           series: data.series.map(s => ({ ...s, data: s.data.filter(p => p.time <= cut) })),
+           signals: (data.signals || []).filter(x => x.bar_ts <= cut) };
 }
 
 async function loadChart({ keepRange = false } = {}) {
-  const specs = indicatorSpecs();
+  if (state.replay && keepRange) return;          // no live refresh while replaying
   $("chartMsg").textContent = keepRange ? "" : "加载中…";
   let data;
   try {
-    const q = new URLSearchParams({ symbol: state.symbol, interval: state.interval, limit: 1500, indicators: specs.map(s => s.spec).join(",") });
+    const q = new URLSearchParams({ symbol: state.symbol, interval: state.interval, limit: 2000, indicators: indicatorSpecs().join(",") });
     data = await api("/api/chart?" + q);
   } catch (e) { $("chartMsg").textContent = "无法加载：" + e.message; return; }
   $("chartMsg").textContent = "";
-  const range = keepRange && chart ? chart.timeScale().getVisibleLogicalRange() : null;
-  const ids = data.series.map(s => s.id).join("|");
-  if (!chart || !keepRange || !lastData || lastData.series.map(s => s.id).join("|") !== ids) buildChart();
-  lastData = data;
-
-  candles.setData(data.bars.map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
-  const upV = css("--up") + "66", dnV = css("--down") + "66";
-  volume.setData(data.bars.map(b => ({ time: b.time, value: b.volume, color: b.close >= b.open ? upV : dnV })));
-
-  const paneIndex = { price: 0 };
-  let nextPane = 1;
-  const specBySeries = (s) => specs.find(x => s.id === x.spec || s.id.startsWith(x.spec + ":") || s.group === x.spec);
-  for (const s of data.series) {
-    if (!(s.pane in paneIndex)) paneIndex[s.pane] = nextPane++;
-    const slot = (specBySeries(s) || {}).slot;
-    let ser = seriesMap.get(s.id);
-    if (!ser) {
-      const color = colorFor(s, slot);
-      if (s.kind === "histogram") {
-        ser = chart.addSeries(LWC.HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, paneIndex[s.pane]);
-      } else {
-        ser = chart.addSeries(LWC.LineSeries, { color, lineWidth: 2, priceLineVisible: false, lastValueVisible: s.pane !== "price",
-          crosshairMarkerRadius: 3, lineType: s.group && s.group.startsWith("supertrend") ? LWC.LineType.WithSteps : LWC.LineType.Simple }, paneIndex[s.pane]);
-      }
-      (s.levels || []).forEach(lv => ser.createPriceLine({ price: lv, color: css("--muted"), lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: false }));
-      seriesMap.set(s.id, ser);
-      ser._meta = { name: s.name, color: s.kind === "histogram" ? css("--muted") : color, pane: s.pane };
-    }
-    if (s.kind === "histogram") {
-      ser.setData(s.data.map(p => ({ ...p, color: p.value >= 0 ? css("--up") + "99" : css("--down") + "99" })));
-    } else ser.setData(s.data);
-  }
-  const panes = chart.panes();
-  panes.forEach((p, i) => p.setStretchFactor(i === 0 ? 3 : 1));
-
-  applyMarkers();
-  drawAlertLines();
-  if (range) chart.timeScale().setVisibleLogicalRange(range);
-  else chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, data.bars.length - 160), to: data.bars.length + 5 });
-
+  fullData = data;
+  await loadCompares();
+  render({ keepRange });
   const l = data.last;
   $("qPx").textContent = fmt(l.price, l.price < 10 ? 4 : 2);
   $("qChg").innerHTML = pctHtml(l.change_pct) + (l.forming ? ' <span class="badge">K 线进行中</span>' : "");
   $("provider").textContent = { yfinance: "Yahoo Finance（延迟）", massive: "Massive 行情", demo: "演示数据" }[data.provider] || data.provider;
   $("updated").textContent = "更新于 " + new Date().toLocaleTimeString();
   document.title = `${data.symbol} ${fmt(l.price)} · StockPulse`;
+}
+
+async function loadCompares() {
+  compareData = new Map();
+  await Promise.all(state.compares.map(async sym => {
+    try {
+      const d = await api("/api/chart?" + new URLSearchParams({ symbol: sym, interval: state.interval, limit: 2000 }));
+      compareData.set(sym, d.bars.map(b => ({ time: b.time, value: b.close })));
+    } catch (e) { /* ignore a bad compare symbol */ }
+  }));
+}
+
+function render({ keepRange = false } = {}) {
+  if (!fullData) return;
+  const data = sliceForReplay(fullData);
+  const range = keepRange && chart ? chart.timeScale().getVisibleLogicalRange() : null;
+  const sig = data.series.map(s => s.id).join("|") + "#" + state.chartType + "#" + [...compareData.keys()].join(",");
+  if (!chart || !keepRange || !lastData || lastData._sig !== sig) buildChart();
+  lastData = { ...data, _sig: sig };
+
+  candles.setData(mainData(data.bars));
+  chart.priceScale("right").applyOptions({ mode: priceScaleMode() });
+  const upV = css("--up") + "66", dnV = css("--down") + "66";
+  volume.setData(data.bars.map(b => ({ time: b.time, value: b.volume, color: b.close >= b.open ? upV : dnV })));
+
+  // compare symbols: same pane, percentage scale
+  const cmpSlots = ["--s6", "--s8", "--s5", "--s3"];
+  let ci = 0;
+  const cut = data.bars.length ? data.bars[data.bars.length - 1].time : Infinity;
+  for (const [sym, pts] of compareData) {
+    let ser = compareSeries.get(sym);
+    if (!ser) {
+      ser = chart.addSeries(LWC.LineSeries, { color: css(cmpSlots[ci % cmpSlots.length]), lineWidth: 2, priceLineVisible: false, title: sym });
+      ser._meta = { name: sym, color: css(cmpSlots[ci % cmpSlots.length]), pane: "price" };
+      compareSeries.set(sym, ser);
+    }
+    ser.setData(pts.filter(p => p.time <= cut));
+    ci++;
+  }
+
+  const paneIndex = { price: 0, volume: 0 };
+  let nextPane = 1;
+  const perInstance = {};
+  for (const s of data.series) {
+    if (!(s.pane in paneIndex)) paneIndex[s.pane] = nextPane++;
+    const idx = perInstance[s.uid] = (perInstance[s.uid] ?? -1) + 1;
+    let ser = seriesMap.get(s.id);
+    if (!ser) {
+      const color = seriesColor(s, idx);
+      const opts = { priceLineVisible: false, lastValueVisible: s.pane !== "price" && s.pane !== "volume" };
+      if (s.pane === "volume") opts.priceScaleId = "vol";
+      if (s.kind === "histogram") ser = chart.addSeries(LWC.HistogramSeries, opts, paneIndex[s.pane]);
+      else if (s.kind === "dots") ser = chart.addSeries(LWC.LineSeries, { ...opts, color, lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 2 }, paneIndex[s.pane]);
+      else ser = chart.addSeries(LWC.LineSeries, { ...opts, color, lineWidth: BAND_TYPES.some(t => s.id.includes(t)) ? 1 : 2, crosshairMarkerRadius: 3,
+        lineType: s.group && s.group.startsWith("supertrend") ? LWC.LineType.WithSteps : LWC.LineType.Simple }, paneIndex[s.pane]);
+      (s.levels || []).forEach(lv => ser.createPriceLine({ price: lv, color: css("--muted"), lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: false }));
+      seriesMap.set(s.id, ser);
+      ser._meta = { name: s.name, color: s.kind === "histogram" ? css("--muted") : color, pane: s.pane };
+    }
+    if (s.kind === "histogram") ser.setData(s.data.map(p => ({ ...p, color: p.value >= 0 ? css("--up") + "99" : css("--down") + "99" })));
+    else ser.setData(s.data);
+  }
+  chart.panes().forEach((p, i) => p.setStretchFactor(i === 0 ? 3 : 1));
+
+  applyMarkers();
+  drawAlertLines();
+  if (range) chart.timeScale().setVisibleLogicalRange(range);
+  else chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, data.bars.length - 160), to: data.bars.length + 8 });
+  if (window.Drawings) Drawings.setBars(data.bars, state.interval, state.symbol);
   updateLegend();
+  if (!$("tableView").hidden) renderDataTable();
+  updateReplayInfo();
 }
 
 let alertLines = [], alertGen = 0;
@@ -562,17 +713,20 @@ function markerFor(action, time, note) {
            color: buy ? css("--up") : css("--down"), text: (ACTION[action] || [action])[0] + (note && note !== "信号" ? "·" + note : "") };
 }
 
+const fmtVol = (v) => v == null ? "—" : v >= 1e9 ? (v / 1e9).toFixed(2) + "B" : v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e3 ? (v / 1e3).toFixed(1) + "K" : String(Math.round(v));
 function updateLegend(param) {
-  if (!lastData) return;
+  if (!lastData || !lastData.bars.length) return;
   const bars = lastData.bars;
-  let bar = null;
-  if (param && param.time !== undefined) bar = param.seriesData.get(candles);
-  if (!bar) bar = bars[bars.length - 1];
-  const t = param && param.time !== undefined ? param.time : bar.time;
-  const chg = bar.open ? (bar.close / bar.open - 1) * 100 : 0;
-  let html = `<div><span class="title">${esc(lastData.symbol)}</span> <span class="muted">${esc(state.interval)} · ${esc(timeFmt(t))}</span></div>
-    <div><span class="item">开<b>${fmt(bar.open)}</b></span><span class="item">高<b>${fmt(bar.high)}</b></span><span class="item">低<b>${fmt(bar.low)}</b></span><span class="item">收<b class="${chg >= 0 ? "up" : "down"}">${fmt(bar.close)}</b></span></div><div>`;
-  for (const [, ser] of seriesMap) {
+  const t = param && param.time !== undefined ? param.time : bars[bars.length - 1].time;
+  const i = bars.findIndex(b => b.time === t);
+  const bar = bars[i >= 0 ? i : bars.length - 1];
+  const prev = bars[(i >= 0 ? i : bars.length - 1) - 1];
+  const chg = prev ? (bar.close / prev.close - 1) * 100 : 0;
+  let html = `<div><span class="title">${esc(lastData.symbol)}</span> <span class="muted">${esc(state.interval)} · ${esc(timeFmt(bar.time))}${state.replay ? " · 回放中" : ""}</span></div>
+    <div><span class="item">开<b>${fmt(bar.open)}</b></span><span class="item">高<b>${fmt(bar.high)}</b></span><span class="item">低<b>${fmt(bar.low)}</b></span>
+    <span class="item">收<b class="${chg >= 0 ? "up" : "down"}">${fmt(bar.close)}</b></span><span class="item">涨跌<b class="${chg >= 0 ? "up" : "down"}">${chg >= 0 ? "+" : ""}${fmt(chg)}%</b></span>
+    <span class="item">量<b>${fmtVol(bar.volume)}</b></span></div><div>`;
+  for (const [, ser] of [...compareSeries, ...seriesMap]) {
     const m = ser._meta;
     let v = param && param.seriesData ? param.seriesData.get(ser) : null;
     if (!v) { const d = ser.data(); v = d.length ? d[d.length - 1] : null; }
@@ -584,32 +738,187 @@ function updateLegend(param) {
 // ---------------------------------------------------------------- toolbar
 function renderIntervals() {
   $("intervals").innerHTML = INTERVALS.map(([k, l]) => `<button data-iv="${k}" class="${k === state.interval ? "on" : ""}">${l}</button>`).join("");
-  $("intervals").querySelectorAll("button").forEach(b => b.onclick = () => { state.interval = b.dataset.iv; store.set("sp.interval", state.interval); renderIntervals(); loadChart(); });
+  $("intervals").querySelectorAll("button").forEach(b => b.onclick = () => { state.interval = b.dataset.iv; store.set("sp.interval", state.interval); exitReplay(false); renderIntervals(); loadChart(); });
 }
+function saveInds() { store.set("sp.inds", state.inds); }
 function renderIndMenu() {
-  $("indMenu").innerHTML = INDICATORS.map(([k, label, def]) => `<label><input type="checkbox" data-ind="${k}" ${k in state.inds ? "checked" : ""}> ${label}
-      ${def ? `<input type="text" data-arg="${k}" value="${esc(state.inds[k] ?? def)}" title="参数，用冒号分隔">` : ""}</label>`).join("")
-    + `<div class="muted" style="font-size:11px;padding:4px">参数用冒号分隔，如 布林带 20:2</div>`;
-  $("indMenu").querySelectorAll("input").forEach(inp => inp.onchange = () => {
-    const next = {};
-    INDICATORS.forEach(([k, , def]) => {
-      if ($("indMenu").querySelector(`[data-ind="${k}"]`).checked) {
-        const a = $("indMenu").querySelector(`[data-arg="${k}"]`);
-        next[k] = a ? a.value.trim() : def;
-      }
+  const rows = state.inds.map(i => {
+    const [label, def] = IND_CATALOG[i.type] || [i.type, ""];
+    const color = i.color || css((IND_CATALOG[i.type] || [])[2] || "--s1");
+    return `<div class="ind-row" data-id="${esc(i.id)}"><span>${esc(label)}</span>
+      ${def ? `<input type="text" data-k="args" value="${esc(i.args)}" title="参数，用冒号分隔">` : "<span></span>"}
+      <input type="color" data-k="color" value="${esc(color.length === 7 ? color : "#3987e5")}" title="颜色">
+      <button class="danger" data-k="del" title="移除" aria-label="移除 ${esc(label)}">×</button></div>`;
+  }).join("") || '<div class="muted" style="padding:4px">图上还没有指标</div>';
+  const opts = Object.entries(IND_CATALOG).map(([k, [l]]) => `<option value="${k}">${esc(l)}</option>`).join("");
+  $("indMenu").innerHTML = `<div style="font-weight:600;margin-bottom:4px">图上的指标</div>${rows}
+    <div class="row" style="margin-top:8px"><select id="indAdd">${opts}</select><button class="primary" id="indAddBtn" style="flex:0 0 auto">添加</button></div>
+    <div class="muted" style="font-size:11px;padding:4px 0">同一个指标可以加多条，比如 EMA 20 / 50 / 200。参数用冒号分隔，如布林带 20:2。</div>`;
+  $("indMenu").querySelectorAll(".ind-row").forEach(row => {
+    const inst = state.inds.find(x => x.id === row.dataset.id);
+    row.querySelectorAll("[data-k]").forEach(el => {
+      if (el.dataset.k === "del") el.onclick = () => { state.inds = state.inds.filter(x => x !== inst); saveInds(); renderIndMenu(); loadChart({ keepRange: true }); };
+      else el.onchange = () => { inst[el.dataset.k] = el.value.trim(); saveInds(); lastData = null; loadChart({ keepRange: false }); };
     });
-    state.inds = next; store.set("sp.inds", next); loadChart({ keepRange: true });
   });
+  $("indAddBtn").onclick = () => {
+    const type = $("indAdd").value;
+    const n = Math.max(0, ...state.inds.map(i => +String(i.id).slice(1) || 0)) + 1;
+    state.inds.push({ id: "i" + n, type, args: IND_CATALOG[type][1], color: null });
+    saveInds(); renderIndMenu(); loadChart({ keepRange: true });
+  };
 }
 $("indBtn").onclick = (e) => { e.stopPropagation(); $("indMenu").classList.toggle("open"); };
-document.addEventListener("click", (e) => { if (!$("indMenu").contains(e.target)) $("indMenu").classList.remove("open"); });
+$("indMenu").addEventListener("click", (e) => e.stopPropagation());   // menu re-renders itself; keep it open
+document.addEventListener("click", (e) => { if (e.target !== $("indBtn")) $("indMenu").classList.remove("open"); });
+
+$("chartType").value = state.chartType;
+$("chartType").onchange = () => { state.chartType = $("chartType").value; store.set("sp.chartType", state.chartType); lastData = null; render(); };
+function renderScaleBtns() {
+  $("scaleLog").classList.toggle("on", state.scale === "log");
+  $("scalePct").classList.toggle("on", state.scale === "percent" || state.compares.length > 0);
+  $("cmpBtn").textContent = state.compares.length ? `对比：${state.compares.join(",")} ×` : "＋对比";
+}
+$("scaleLog").onclick = () => { state.scale = state.scale === "log" ? "normal" : "log"; store.set("sp.scale", state.scale); renderScaleBtns(); chart && chart.priceScale("right").applyOptions({ mode: priceScaleMode() }); };
+$("scalePct").onclick = () => { state.scale = state.scale === "percent" ? "normal" : "percent"; store.set("sp.scale", state.scale); renderScaleBtns(); chart && chart.priceScale("right").applyOptions({ mode: priceScaleMode() }); };
+$("cmpBtn").onclick = async () => {
+  if (state.compares.length && confirm("清除全部对比代码？")) state.compares = [];
+  else {
+    const s = (prompt("输入要叠加对比的代码（如 SPY、QQQ），多个用逗号分隔：", "SPY") || "").toUpperCase();
+    s.split(/[,\s]+/).filter(Boolean).forEach(x => { if (x !== state.symbol && !state.compares.includes(x)) state.compares.push(x); });
+    state.compares = state.compares.slice(0, 4);
+  }
+  store.set("sp.compares", state.compares); renderScaleBtns(); lastData = null; await loadCompares(); render();
+};
+
+// ---------------------------------------------------------------- replay
+let replayTimer = null;
+function updateReplayInfo() {
+  if (!state.replay || !fullData) return;
+  const b = fullData.bars[state.replay.idx];
+  $("rpSlider").max = fullData.bars.length - 1; $("rpSlider").value = state.replay.idx;
+  $("rpInfo").textContent = b ? `${timeFmt(b.time)} · ${state.replay.idx + 1}/${fullData.bars.length}` : "";
+}
+function replayTo(idx) {
+  if (!fullData) return;
+  state.replay.idx = Math.max(20, Math.min(fullData.bars.length - 1, idx));
+  render({ keepRange: true });
+  if (state.replay.idx >= fullData.bars.length - 1) stopReplayTimer();
+}
+function stopReplayTimer() { clearInterval(replayTimer); replayTimer = null; $("rpPlay").textContent = "▶"; }
+function exitReplay(redraw = true) {
+  stopReplayTimer();
+  if (!state.replay) return;
+  state.replay = null; $("replayBar").hidden = true; $("replayBtn").classList.remove("on");
+  if (redraw) { lastData = null; render(); }
+}
+$("replayBtn").onclick = () => {
+  if (state.replay) return exitReplay();
+  if (!fullData) return;
+  const vr = chart.timeScale().getVisibleLogicalRange();
+  const start = vr ? Math.round(vr.from + (vr.to - vr.from) * 0.5) : fullData.bars.length - 100;
+  state.replay = { idx: Math.max(20, Math.min(fullData.bars.length - 2, start)) };
+  $("replayBar").hidden = false; $("replayBtn").classList.add("on");
+  render({ keepRange: true });
+};
+$("rpStep").onclick = () => replayTo(state.replay.idx + 1);
+$("rpBack").onclick = () => replayTo(state.replay.idx - 1);
+$("rpSlider").oninput = () => replayTo(+$("rpSlider").value);
+$("rpExit").onclick = () => exitReplay();
+$("rpPlay").onclick = () => {
+  if (replayTimer) return stopReplayTimer();
+  $("rpPlay").textContent = "⏸";
+  replayTimer = setInterval(() => replayTo(state.replay.idx + 1), +$("rpSpeed").value);
+};
+$("rpSpeed").onchange = () => { if (replayTimer) { stopReplayTimer(); $("rpPlay").click(); } };
+
+// ---------------------------------------------------------------- data table
+function tableColumns() {
+  const cols = [];
+  for (const [id, ser] of seriesMap) cols.push({ id, name: ser._meta.name, map: new Map(ser.data().map(p => [p.time, p.value])) });
+  return cols;
+}
+function renderDataTable() {
+  if (!lastData) return;
+  const cols = tableColumns();
+  const bars = lastData.bars.slice(-500).reverse();
+  $("dataTable").innerHTML = `<thead><tr><th>时间</th><th class="num">开</th><th class="num">高</th><th class="num">低</th><th class="num">收</th><th class="num">涨跌%</th><th class="num">成交量</th>
+    ${cols.map(c => `<th class="num">${esc(c.name)}</th>`).join("")}</tr></thead><tbody>` +
+    bars.map((b, i) => {
+      const prev = bars[i + 1]; const chg = prev ? (b.close / prev.close - 1) * 100 : null;
+      return `<tr><td>${esc(timeFmt(b.time))}</td><td class="num">${fmt(b.open)}</td><td class="num">${fmt(b.high)}</td><td class="num">${fmt(b.low)}</td>
+        <td class="num">${fmt(b.close)}</td><td class="num">${pctHtml(chg)}</td><td class="num">${fmtVol(b.volume)}</td>
+        ${cols.map(c => `<td class="num">${c.map.has(b.time) ? fmt(c.map.get(b.time)) : "—"}</td>`).join("")}</tr>`;
+    }).join("") + "</tbody>";
+}
+$("tableBtn").onclick = () => {
+  showBottom("tableView");
+  $("btTitle").textContent = `数据表 · ${state.symbol} · ${state.interval}`; $("btSub").textContent = "";
+  renderDataTable();
+};
+$("csvBtn").onclick = () => {
+  if (!lastData) return;
+  const cols = tableColumns();
+  const q = (v) => `"${String(v).replace(/"/g, '""')}"`;
+  const lines = [["time", "open", "high", "low", "close", "volume", ...cols.map(c => c.name)].map(q).join(",")];
+  lastData.bars.forEach(b => lines.push([new Date(b.time * 1000).toISOString(), b.open, b.high, b.low, b.close, b.volume,
+    ...cols.map(c => c.map.has(b.time) ? c.map.get(b.time) : "")].join(",")));
+  const url = URL.createObjectURL(new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a"); a.href = url; a.download = `${state.symbol}_${state.interval}.csv`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+// ---------------------------------------------------------------- screener
+let scrData = null, scrSort = { key: "change_pct", dir: -1 };
+async function runScreener() {
+  $("scrRun").disabled = true; $("scrInfo").textContent = "筛选中…（第一次需要下载数据）";
+  try {
+    const symbols = $("scrSymbols").value.split(/[,\s]+/).map(x => x.trim().toUpperCase()).filter(Boolean);
+    scrData = await api("/api/screener", { method: "POST", body: JSON.stringify({ filter: $("scrFilter").value, symbols }) });
+    $("scrInfo").textContent = `符合 ${scrData.rows.length} / ${scrData.total} 个${scrData.missing.length ? ` · 无数据：${scrData.missing.join(", ")}` : ""} · 点表头排序，点行打开图表`;
+    renderScreener();
+  } catch (e) { $("scrInfo").innerHTML = `<span class="errors">${esc(e.message)}</span>`; }
+  $("scrRun").disabled = false;
+}
+function renderScreener() {
+  if (!scrData) return;
+  const cols = Object.entries(scrData.columns);
+  const rows = scrData.rows.slice().sort((a, b) => {
+    const x = a[scrSort.key], y = b[scrSort.key];
+    if (x == null) return 1; if (y == null) return -1;
+    return (typeof x === "string" ? x.localeCompare(y) : x - y) * scrSort.dir;
+  });
+  const arrow = (k) => scrSort.key === k ? (scrSort.dir > 0 ? " ▲" : " ▼") : "";
+  const cell = (k, v) => {
+    if (v == null) return "—";
+    if (k.endsWith("_pct") || k.startsWith("perf_") || k.startsWith("vs_") || k.startsWith("from_")) return pctHtml(v);
+    if (k === "volume") return fmtVol(v);
+    return fmt(v, k === "rel_volume" ? 2 : k.startsWith("rsi") || k.startsWith("adx") ? 1 : 2);
+  };
+  $("scrTable").innerHTML = `<thead><tr><th class="sortable" data-k="symbol">代码${arrow("symbol")}</th>${cols.map(([k, l]) => `<th class="num sortable" data-k="${k}">${esc(l)}${arrow(k)}</th>`).join("")}</tr></thead><tbody>` +
+    rows.map(r => `<tr class="click" data-s="${esc(r.symbol)}"><td><b>${esc(r.symbol)}</b></td>${cols.map(([k]) => `<td class="num">${cell(k, r[k])}</td>`).join("")}</tr>`).join("") + "</tbody>";
+  $("scrTable").querySelectorAll("th.sortable").forEach(th => th.onclick = () => {
+    scrSort = { key: th.dataset.k, dir: scrSort.key === th.dataset.k ? -scrSort.dir : -1 }; renderScreener();
+  });
+  $("scrTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => setSymbol(tr.dataset.s));
+}
+$("screenBtn").onclick = () => {
+  showBottom("screenView");
+  $("btTitle").textContent = "股票筛选器"; $("btSub").textContent = "日线指标";
+  if (!scrData) runScreener();
+};
+$("scrRun").onclick = runScreener;
+$("scrFilter").addEventListener("keydown", e => { if (e.key === "Enter") runScreener(); });
 
 function setSymbol(sym, interval) {
   sym = (sym || "").trim().toUpperCase();
   if (!sym) return;
+  exitReplay(false);
   state.symbol = sym; store.set("sp.symbol", sym);
+  state.compares = state.compares.filter(x => x !== sym);
   if (interval) { state.interval = interval; store.set("sp.interval", interval); renderIntervals(); }
   $("symbolInput").value = sym;
+  lastData = null;
   loadChart();
   renderWatch();
 }
@@ -786,7 +1095,7 @@ function renderBacktest(bt, name) {
 
 function showBottom(view) {
   $("bottom").classList.add("open");
-  ["btView", "scanView", "optView"].forEach(v => $(v).hidden = v !== view);
+  ["btView", "scanView", "optView", "tableView", "screenView"].forEach(v => $(v).hidden = v !== view);
 }
 
 // ---------------------------------------------------------------- optimizer
@@ -1087,7 +1396,7 @@ const params = new URLSearchParams(location.search);
 if (params.get("symbol")) state.symbol = params.get("symbol").toUpperCase();
 if (params.get("interval")) state.interval = params.get("interval");
 $("symbolInput").value = state.symbol;
-renderIntervals(); renderIndMenu();
+renderIntervals(); renderIndMenu(); renderScaleBtns();
 loadChart(); loadWatch();
 loadMeta().then(() => { configToForm(store.get("sp.draft", { name: "", interval: state.interval, symbols: [state.symbol] })); }).catch(() => {});
 loadStrategies().catch(() => {});
@@ -1098,5 +1407,6 @@ setInterval(() => { if (!document.hidden) loadChart({ keepRange: true }); }, 300
 setInterval(() => { if (!document.hidden) loadWatch(); }, 60000);
 setInterval(() => { if (!document.hidden && $("tab-signals").classList.contains("on")) loadSignals(); }, 60000);
 </script>
+<script src="/static/drawings.js"></script>
 </body>
 </html>

@@ -19,8 +19,20 @@
 
 **图表**
 - K 线 + 成交量，周期 1 分 / 5 分 / 15 分 / 1 小时 / 日 / 周。图表库是 TradingView 开源的 [Lightweight Charts](https://github.com/tradingview/lightweight-charts)（已打包进项目，不依赖外网 CDN）。
-- 指标：EMA、SMA、布林带、VWAP、SuperTrend、唐奇安通道（叠加在主图），RSI、MACD、随机指标 KD、ATR（独立副图）。参数可调。
-- 十字光标显示 OHLC 和所有指标值；数据每 30 秒自动刷新，K 线未收盘时会标“K 线进行中”。
+- 图表类型：蜡烛图、空心蜡烛、美国线、折线、面积、平均 K 线（Heikin Ashi）；价格轴可切换普通 / 对数 / 百分比。
+- **指标管理**（“指标”菜单）：同一指标可以加多个、各自设参数和颜色（例如 EMA 20 + EMA 50 + EMA 200），随时删除；设置会记在浏览器里。
+  - 主图：EMA、SMA、WMA、布林带、肯特纳通道、VWAP、SuperTrend、唐奇安通道、一目均衡表、抛物线 SAR。
+  - 副图：RSI、MACD、KD、Stoch RSI、ATR、ADX/DMI、CCI、威廉 %R、MFI、ROC、OBV；成交量均线叠加在量柱上。
+- **画线工具**（图表左侧工具栏）：趋势线、射线、延长线、水平线、垂直线、矩形、斐波那契回撤、文字标注、测量（涨跌幅 + K 线数）。
+  - 点选后可拖动整条线或端点，可改颜色 / 粗细 / 虚线、锁定、删除；磁铁模式吸附到 OHLC；一键隐藏 / 清空；“图形列表”管理全部画线。
+  - 画线按代码保存在服务器（SQLite），换设备打开也在。
+  - 水平线可一键变成**价格提醒**（🔔），触发后走 Telegram。
+  - 快捷键：`Alt+T` 趋势线、`Alt+H` 水平线、`Alt+V` 垂直线、`Alt+F` 斐波那契、`Esc` 取消、`Delete` 删除选中。
+- **对比**：叠加其他代码（例如 SPY、QQQ），自动切到百分比坐标比较走势。
+- **K 线回放**：从任意位置开始逐根 / 自动播放（1x–10x），用来练习看盘和人工验证策略，回放中未来数据不可见。
+- **数据表**：把当前图表的 OHLCV 和所有指标值列成表，可导出 CSV（Excel 直接打开不乱码）。
+- **股票筛选器**：对自选 + 热门股（或你填的代码）计算价格、涨跌、量比、1 周 ~ 1 年表现、RSI、ADX、ATR%、距 50/200 日线、距 52 周高低点；表头点击排序，可用规则语法过滤（例如 `rsi(close, 14) < 35 and close > sma(close, 200)`），点行打开图表。
+- 十字光标显示 OHLC、涨跌幅、成交量和所有指标值；数据每 30 秒自动刷新，K 线未收盘时会标“K 线进行中”。
 - 自选列表：美股、港股（`0700.HK`）、A 股（`600519.SS`）、加密货币（`BTC-USD`，仅 Yahoo 数据源）。
 
 **行情数据**
@@ -39,7 +51,7 @@
 ```
 
 - 行情变量：`open high low close volume hl2 hlc3 ohlc4`；`close[1]` 是前一根 K 线的值。
-- 函数：`sma ema wma rsi macd macd_signal macd_hist bb_upper bb_mid bb_lower stoch_k stoch_d atr vwap supertrend supertrend_dir obv highest lowest crossover crossunder prev change rising falling abs max min`。
+- 函数：`sma ema wma rsi macd macd_signal macd_hist bb_upper bb_mid bb_lower stoch_k stoch_d atr adx plus_di minus_di cci willr mfi roc psar kc_upper kc_lower vwap supertrend supertrend_dir obv highest lowest crossover crossunder prev change rising falling abs max min`。
 - 运算：`and or not`、比较、加减乘除。表达式在服务器上用白名单解析，不能执行任意代码。
 - **引用其他代码**（同周期）：`ref_close("SPY")`、`ref_high/ref_low/ref_open/ref_volume`。最常用的是大盘过滤：`ref_close("SPY") > sma(ref_close("SPY"), 200)`，只在大盘处于长期上升趋势时开仓。
 - **按风险定仓位**：填“单笔风险 %”（例如 1），系统按“碰到止损约亏账户 1%”自动算股数（需要设止损），“每笔占账户 %”变成仓位上限。回测、模拟账户和券商下单都按这个算。
@@ -304,3 +316,4 @@ deploy/             systemd 服务模板
 - 热度 ≠ 涨幅。社交媒体热度很容易被炒作带动，评分只代表“正在被关注且舆论偏正面”，不预测价格。
 - 免费数据源有频率限制，偶尔会失败；单个源失败不影响整轮分析。
 - Yahoo 行情有延迟，不适合日内交易。
+- 和 TradingView 相比没有：社区观点 / 脚本库、财报和基本面数据、期权链、多图布局、完整的 Pine Script（这里是简化的规则语法）。

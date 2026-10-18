@@ -114,3 +114,97 @@ def crossover(a: pd.Series, b) -> pd.Series:
 def crossunder(a: pd.Series, b) -> pd.Series:
     b = b if isinstance(b, pd.Series) else pd.Series(b, index=a.index)
     return ((a < b) & (a.shift(1) >= b.shift(1))).fillna(False)
+
+
+# ---------------------------------------------------------------- more indicators
+def dmi(df: pd.DataFrame, n: int = 14) -> pd.DataFrame:
+    """Wilder's DMI: +DI, -DI and ADX."""
+    n = int(n)
+    up = df["high"].diff()
+    down = -df["low"].diff()
+    plus_dm = pd.Series(np.where((up > down) & (up > 0), up, 0.0), index=df.index)
+    minus_dm = pd.Series(np.where((down > up) & (down > 0), down, 0.0), index=df.index)
+    tr = true_range(df).ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
+    pdi = 100 * plus_dm.ewm(alpha=1 / n, adjust=False, min_periods=n).mean() / tr.replace(0, np.nan)
+    mdi = 100 * minus_dm.ewm(alpha=1 / n, adjust=False, min_periods=n).mean() / tr.replace(0, np.nan)
+    dx = 100 * (pdi - mdi).abs() / (pdi + mdi).replace(0, np.nan)
+    return pd.DataFrame({"plus_di": pdi, "minus_di": mdi, "adx": dx.ewm(alpha=1 / n, adjust=False, min_periods=n).mean()})
+
+
+def adx(df: pd.DataFrame, n: int = 14) -> pd.Series:
+    return dmi(df, n)["adx"]
+
+
+def cci(df: pd.DataFrame, n: int = 20) -> pd.Series:
+    n = int(n)
+    tp = (df["high"] + df["low"] + df["close"]) / 3
+    ma = tp.rolling(n, min_periods=n).mean()
+    md = tp.rolling(n, min_periods=n).apply(lambda x: float(np.mean(np.abs(x - x.mean()))), raw=True)
+    return (tp - ma) / (0.015 * md.replace(0, np.nan))
+
+
+def willr(df: pd.DataFrame, n: int = 14) -> pd.Series:
+    hi, lo = highest(df["high"], n), lowest(df["low"], n)
+    return -100 * (hi - df["close"]) / (hi - lo).replace(0, np.nan)
+
+
+def mfi(df: pd.DataFrame, n: int = 14) -> pd.Series:
+    n = int(n)
+    tp = (df["high"] + df["low"] + df["close"]) / 3
+    flow = tp * df["volume"]
+    pos = flow.where(tp > tp.shift(1), 0.0).rolling(n, min_periods=n).sum()
+    neg = flow.where(tp < tp.shift(1), 0.0).rolling(n, min_periods=n).sum()
+    return 100 - 100 / (1 + pos / neg.replace(0, np.nan))
+
+
+def roc(s: pd.Series, n: int = 12) -> pd.Series:
+    return (s / s.shift(int(n)) - 1) * 100
+
+
+def stoch_rsi(s: pd.Series, n: int = 14, k: int = 3, d: int = 3) -> pd.DataFrame:
+    r = rsi(s, n)
+    lo, hi = r.rolling(int(n), min_periods=int(n)).min(), r.rolling(int(n), min_periods=int(n)).max()
+    raw = (100 * (r - lo) / (hi - lo).replace(0, np.nan)).clip(0, 100)  # clip float noise
+    kk = raw.rolling(int(k), min_periods=int(k)).mean()
+    return pd.DataFrame({"k": kk, "d": kk.rolling(int(d), min_periods=int(d)).mean()})
+
+
+def keltner(df: pd.DataFrame, n: int = 20, mult: float = 2.0) -> pd.DataFrame:
+    mid = ema(df["close"], n)
+    a = atr(df, n)
+    return pd.DataFrame({"mid": mid, "upper": mid + mult * a, "lower": mid - mult * a})
+
+
+def ichimoku(df: pd.DataFrame, conv: int = 9, base: int = 26, span_b: int = 52) -> pd.DataFrame:
+    """Tenkan, Kijun and the two cloud spans (spans are NOT shifted forward here: value at t uses data up to t)."""
+    mid = lambda n: (highest(df["high"], n) + lowest(df["low"], n)) / 2  # noqa: E731
+    tenkan, kijun = mid(conv), mid(base)
+    return pd.DataFrame({"tenkan": tenkan, "kijun": kijun, "span_a": (tenkan + kijun) / 2, "span_b": mid(span_b)})
+
+
+def psar(df: pd.DataFrame, step: float = 0.02, max_step: float = 0.2) -> pd.Series:
+    high, low = df["high"].to_numpy(dtype=float), df["low"].to_numpy(dtype=float)
+    n = len(df)
+    out = np.full(n, np.nan)
+    if n < 2:
+        return pd.Series(out, index=df.index)
+    up = True
+    af = step
+    ep = high[0]
+    sar = low[0]
+    for i in range(1, n):
+        sar = sar + af * (ep - sar)
+        if up:
+            sar = min(sar, low[i - 1], low[i - 2] if i > 1 else low[i - 1])
+            if low[i] < sar:
+                up, sar, ep, af = False, ep, low[i], step
+            elif high[i] > ep:
+                ep, af = high[i], min(af + step, max_step)
+        else:
+            sar = max(sar, high[i - 1], high[i - 2] if i > 1 else high[i - 1])
+            if high[i] > sar:
+                up, sar, ep, af = True, ep, high[i], step
+            elif low[i] < ep:
+                ep, af = low[i], min(af + step, max_step)
+        out[i] = sar
+    return pd.Series(out, index=df.index)

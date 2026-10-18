@@ -1,6 +1,7 @@
 """Chart / strategy / signal API (the TradingView-style part of the app)."""
 from __future__ import annotations
 
+import json
 import math
 import threading
 from typing import Any, Callable
@@ -17,6 +18,7 @@ from ..strategy.presets import PRESETS
 from ..strategy.alerts import Alert
 from ..strategy.optimize import OBJECTIVES, OptimizeError, optimize
 from ..strategy.refs import load_refs
+from ..strategy.screener import run_screener
 from ..strategy.scanner import MAX_SYMBOLS, scan
 from ..strategy.signals import SignalEngine
 
@@ -79,6 +81,48 @@ def indicator_series(df: pd.DataFrame, spec: str) -> list[dict]:
     if k == "atr":
         n = int(_num(parts, 1, 14))
         return [{"id": spec, "name": f"ATR {n}", "pane": "atr", "kind": "line", "data": _line(ind.atr(df, n))}]
+    if k in ("adx", "dmi"):
+        n = int(_num(parts, 1, 14))
+        d = ind.dmi(df, n)
+        return [{"id": f"{spec}:adx", "name": f"ADX {n}", "pane": spec, "kind": "line", "levels": [20, 40], "data": _line(d["adx"])},
+                {"id": f"{spec}:pdi", "name": "+DI", "pane": spec, "kind": "line", "tone": "up", "data": _line(d["plus_di"])},
+                {"id": f"{spec}:mdi", "name": "-DI", "pane": spec, "kind": "line", "tone": "down", "data": _line(d["minus_di"])}]
+    if k == "cci":
+        n = int(_num(parts, 1, 20))
+        return [{"id": spec, "name": f"CCI {n}", "pane": spec, "kind": "line", "levels": [-100, 100], "data": _line(ind.cci(df, n))}]
+    if k == "willr":
+        n = int(_num(parts, 1, 14))
+        return [{"id": spec, "name": f"%R {n}", "pane": spec, "kind": "line", "levels": [-80, -20], "data": _line(ind.willr(df, n))}]
+    if k == "mfi":
+        n = int(_num(parts, 1, 14))
+        return [{"id": spec, "name": f"MFI {n}", "pane": spec, "kind": "line", "levels": [20, 80], "data": _line(ind.mfi(df, n))}]
+    if k == "roc":
+        n = int(_num(parts, 1, 12))
+        return [{"id": spec, "name": f"ROC {n}", "pane": spec, "kind": "line", "levels": [0], "data": _line(ind.roc(c, n))}]
+    if k == "obv":
+        return [{"id": spec, "name": "OBV", "pane": spec, "kind": "line", "data": _line(ind.obv(df))}]
+    if k == "stochrsi":
+        n, kk, d = int(_num(parts, 1, 14)), int(_num(parts, 2, 3)), int(_num(parts, 3, 3))
+        st = ind.stoch_rsi(c, n, kk, d)
+        return [{"id": f"{spec}:k", "name": "StochRSI K", "pane": spec, "kind": "line", "levels": [20, 80], "data": _line(st["k"])},
+                {"id": f"{spec}:d", "name": "StochRSI D", "pane": spec, "kind": "line", "data": _line(st["d"])}]
+    if k == "keltner":
+        n, m = int(_num(parts, 1, 20)), _num(parts, 2, 2)
+        kc = ind.keltner(df, n, m)
+        return [{"id": f"{spec}:{col}", "name": f"KC {col}", "pane": "price", "kind": "line", "group": spec,
+                 "data": _line(kc[col])} for col in ("upper", "mid", "lower")]
+    if k == "ichimoku":
+        a, b, s2 = int(_num(parts, 1, 9)), int(_num(parts, 2, 26)), int(_num(parts, 3, 52))
+        ic = ind.ichimoku(df, a, b, s2)
+        names = {"tenkan": "转换线", "kijun": "基准线", "span_a": "先行A", "span_b": "先行B"}
+        return [{"id": f"{spec}:{col}", "name": names[col], "pane": "price", "kind": "line", "group": spec,
+                 "data": _line(ic[col])} for col in names]
+    if k == "psar":
+        st, mx = _num(parts, 1, 0.02), _num(parts, 2, 0.2)
+        return [{"id": spec, "name": "SAR", "pane": "price", "kind": "dots", "data": _line(ind.psar(df, st, mx))}]
+    if k == "volsma":
+        n = int(_num(parts, 1, 20))
+        return [{"id": spec, "name": f"量 MA{n}", "pane": "volume", "kind": "line", "data": _line(ind.sma(df["volume"], n))}]
     raise HTTPException(400, f"未知指标 {spec!r}")
 
 
@@ -107,8 +151,14 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
         symbol = symbol.upper().strip()
         df = load(symbol, interval, limit)
         series: list[dict] = []
-        for spec in [x.strip() for x in indicators.split(",") if x.strip()][:12]:
-            series += indicator_series(df, spec)
+        for raw in [x.strip() for x in indicators.split(",") if x.strip()][:20]:
+            # "uid=spec" lets the client draw several instances of the same indicator
+            uid, _, spec = raw.rpartition("=")
+            for s in indicator_series(df, spec):
+                if uid:
+                    s = {**s, "id": f"{uid}|{s['id']}", "uid": uid,
+                         "pane": s["pane"] if s["pane"] in ("price", "volume") else f"{uid}|{s['pane']}"}
+                series.append(s)
         bars = [{"time": int(t.timestamp()), "open": round(row.open, 4), "high": round(row.high, 4),
                  "low": round(row.low, 4), "close": round(row.close, 4), "volume": float(row.volume)}
                 for t, row in df.iterrows()]
@@ -120,6 +170,36 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
                      "time": bars[-1]["time"], "forming": len(closed) < len(df)},
             "signals": [s for s in db.list_signals(200, symbol) if s["interval"] == interval],
         }
+
+    # ---------------------------------------------------------------- drawings (per symbol, shared across intervals)
+    @r.get("/drawings")
+    def get_drawings(symbol: str):
+        raw = db.get_kv(f"drawings:{symbol.upper().strip()}")
+        return json.loads(raw) if raw else []
+
+    @r.put("/drawings")
+    def put_drawings(symbol: str, drawings: list[dict[str, Any]] = Body(...), _=require_token):
+        if len(drawings) > 500:
+            raise HTTPException(400, "最多保存 500 个图形")
+        blob = json.dumps(drawings, ensure_ascii=False)
+        if len(blob) > 500_000:
+            raise HTTPException(400, "图形数据太大")
+        db.set_kv(f"drawings:{symbol.upper().strip()}", blob)
+        return {"saved": len(drawings)}
+
+    # ---------------------------------------------------------------- screener
+    @r.post("/screener")
+    def screener(body: dict[str, Any] = Body(default={})):
+        symbols = [s.strip().upper() for s in body.get("symbols") or [] if s and s.strip()]
+        if not symbols:
+            symbols = list(db.get_watchlist(settings.watchlist))
+            snap = db.latest_snapshot() or {}
+            symbols += [r["ticker"] for r in snap.get("ranking", [])]
+        symbols = list(dict.fromkeys(symbols))[:100]
+        try:
+            return run_screener(store, symbols, (body.get("filter") or "").strip())
+        except DSLError as exc:
+            raise HTTPException(400, {"errors": [f"筛选条件：{exc}"]}) from exc
 
     # ---------------------------------------------------------------- watchlist
     filling = threading.Lock()
