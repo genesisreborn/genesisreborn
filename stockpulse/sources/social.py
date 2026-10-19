@@ -40,7 +40,7 @@ def parse_stocktwits(data: dict) -> list[RawItem]:
     items = []
     for i, s in enumerate(data.get("symbols", [])):
         sym = (s.get("symbol") or "").upper()
-        if not sym:
+        if not sym or sym.endswith(".X"):   # StockTwits crypto symbols (BTC.X), not stocks
             continue
         title = f"${sym} trending on StockTwits (#{i + 1}): {s.get('title', '')}".strip()
         items.append(RawItem(

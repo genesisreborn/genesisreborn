@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import math
 import random
+import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -13,6 +14,12 @@ from .config import Settings
 from .db import Database
 
 log = logging.getLogger(__name__)
+
+# Max age of the newest cached bar for which an incremental pull (shortest of the yfinance window
+# below and Massive's 5 / 40 days) still reaches back far enough to leave no hole.
+INCREMENTAL_SAFE = {"1m": timedelta(hours=20), "5m": timedelta(days=4), "15m": timedelta(days=4),
+                    "30m": timedelta(days=4), "1h": timedelta(days=4), "1d": timedelta(days=25),
+                    "1wk": timedelta(days=35)}
 
 # interval -> (bar length, yfinance max lookback, yfinance incremental lookback)
 INTERVALS: dict[str, tuple[timedelta, str, str]] = {
@@ -73,6 +80,12 @@ def fetch_massive(symbol: str, interval: str, incremental: bool, settings: Setti
             if next_url is None:
                 break
             r = client.get(next_url)
+            for wait in (2, 5, 13):   # rate limited (free tier: 5 calls/min): back off a few times
+                if r.status_code != 429:
+                    break
+                ra = r.headers.get("Retry-After", "")
+                time.sleep(min(float(ra), 60) if ra.isdigit() else wait)
+                r = client.get(next_url)
             r.raise_for_status()
             data = r.json()
             rows.extend(data.get("results") or [])
@@ -125,8 +138,6 @@ class BarStore:
 
     def maybe_update(self, symbol: str, interval: str, min_gap_s: float = 60) -> bool:
         """Pull new bars if the cache may be stale; throttled per symbol/interval."""
-        import time
-
         key = (symbol.upper(), interval)
         now = time.monotonic()
         if now - self._last_pull.get(key, -1e9) < min_gap_s:
@@ -174,9 +185,10 @@ class BarStore:
         """Fetch new bars (full history first time, recent window afterwards) and upsert."""
         symbol = symbol.upper()
         bar_length(interval)
-        incremental = self.last_ts(symbol, interval) is not None
-        import time
-
+        last = self.last_ts(symbol, interval)
+        # incremental pulls only cover a short recent window; after a longer gap re-fetch everything
+        incremental = last is not None and (
+            datetime.now(timezone.utc).timestamp() - last < INCREMENTAL_SAFE[interval].total_seconds())
         self._last_pull[(symbol, interval)] = time.monotonic()
         try:
             df = self._fetch(symbol, interval, incremental)
@@ -214,7 +226,8 @@ def closed_bars(df: pd.DataFrame, interval: str, now: datetime | None = None) ->
         ny = ZoneInfo("America/New_York")
         session_day = last.astimezone(ny).date()
         if interval == "1wk":
-            session_day = session_day + timedelta(days=4 - session_day.weekday())
+            # Friday of that week, whether the bar is stamped Monday (Yahoo) or Sunday (Massive/Polygon)
+            session_day = session_day + timedelta(days=(4 - session_day.weekday()) % 7)
         close_at = datetime(session_day.year, session_day.month, session_day.day, 16, 15, tzinfo=ny)
         is_closed = now >= close_at
     else:

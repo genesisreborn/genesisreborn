@@ -26,7 +26,7 @@ def test_build_payload_from_yahoo_shapes():
     assert p["symbol"] == "ACME" and p["profile"]["name"] == "Acme"
     st = {s["key"]: s for s in p["stats"]}
     assert "pe" not in st                              # NaN dropped
-    assert st["dividend_yield"]["value"] == 0.42       # fractions kept as is
+    assert st["dividend_yield"]["value"] == 0.0042     # Yahoo gives percent: 0.42 means 0.42%
     assert st["recommendation"]["value"] == "买入"
     assert abs(st["target_upside"]["value"] - 0.2) < 1e-9
     qs = p["quarterly"]

@@ -168,8 +168,8 @@ def build_payload(symbol: str, info: dict, quarterly: pd.DataFrame | None, annua
             continue
         if key == "recommendation":
             v = RECOMMENDATIONS.get(str(v), str(v))
-        if key == "dividend_yield" and isinstance(v, (int, float)) and v > 1:
-            v = v / 100  # newer Yahoo responses already give percent
+        if key == "dividend_yield" and isinstance(v, (int, float)):
+            v = v / 100  # Yahoo gives dividendYield in percent (0.41 = 0.41%); everything else here is a fraction
         stats.append({"key": key, "label": label, "value": v, "format": fmt})
     price = _clean(info.get("currentPrice") or info.get("regularMarketPrice"))
     target = _clean(info.get("targetMeanPrice"))
@@ -246,7 +246,7 @@ def demo_fundamentals(symbol: str) -> dict:
         "priceToBook": rng.uniform(1, 20), "trailingEps": ttm_ni / shares, "forwardEps": ttm_ni * 1.15 / shares,
         "totalRevenue": ttm_rev, "revenueGrowth": (1 + growth) ** 4 - 1, "grossMargins": margin + 0.3,
         "operatingMargins": margin + 0.05, "profitMargins": margin, "returnOnEquity": rng.uniform(0.05, 0.5),
-        "debtToEquity": rng.uniform(10, 150), "dividendYield": rng.choice([None, 0.005, 0.012, 0.025]),
+        "debtToEquity": rng.uniform(10, 150), "dividendYield": rng.choice([None, 0.5, 1.2, 2.5]),
         "beta": rng.uniform(0.6, 2.2), "fiftyTwoWeekHigh": float(bars["high"].max()), "fiftyTwoWeekLow": float(bars["low"].min()),
         "averageVolume": rng.randint(1_000_000, 50_000_000), "sharesOutstanding": shares, "floatShares": shares * 0.95,
         "shortPercentOfFloat": rng.uniform(0.005, 0.12), "heldPercentInstitutions": rng.uniform(0.4, 0.9),
@@ -267,7 +267,7 @@ def demo_fundamentals(symbol: str) -> dict:
     if info["dividendYield"]:
         for c in q_ends:
             events.append({"time": int((c + timedelta(days=40)).timestamp()), "type": "dividend",
-                           "text": f"分红 {price * info['dividendYield'] / 4:.3f}"})
+                           "text": f"分红 {price * info['dividendYield'] / 100 / 4:.3f}"})
     def balance(ends, revs):
         return pd.DataFrame({c: {"Total Assets": r * 3, "Total Liabilities Net Minority Interest": r * 1.4,
                                  "Stockholders Equity": r * 1.6, "Cash Cash Equivalents And Short Term Investments": r * 0.5,

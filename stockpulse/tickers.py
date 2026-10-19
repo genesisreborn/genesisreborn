@@ -46,7 +46,7 @@ AMBIGUOUS = {
 CASHTAG_RE = re.compile(r"(?<![\w$])\$([A-Za-z]{1,5}(?:[.-][A-Za-z])?)\b")
 BARE_RE = re.compile(r"(?<![\w$])([A-Z]{2,5})(?![\w])")
 # e.g. "Apple (AAPL)" / "(NASDAQ: NVDA)"
-PAREN_RE = re.compile(r"\((?:NASDAQ|NYSE|AMEX|NYSEARCA)?\s*:?\s*([A-Z]{1,5})\)")
+PAREN_RE = re.compile(r"\((NASDAQ|NYSE|AMEX|NYSEARCA)?\s*:?\s*([A-Z]{1,5})\)")
 
 _ALIAS_PATTERNS = [
     (ticker, re.compile(r"\b" + re.escape(alias) + r"\b", re.IGNORECASE))
@@ -76,8 +76,9 @@ def extract_tickers(text: str, extra_universe: set[str] | None = None) -> set[st
         if t in known:
             found.add(t)
     for m in PAREN_RE.finditer(text):
-        t = normalize(m.group(1))
-        if t in known:
+        t = normalize(m.group(2))
+        # "(AI)" is usually an abbreviation, "(NYSE: AI)" is a ticker
+        if t in known and (m.group(1) or t not in AMBIGUOUS):
             found.add(t)
     for m in BARE_RE.finditer(text):
         t = m.group(1)

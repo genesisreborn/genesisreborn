@@ -134,3 +134,69 @@ def test_alert_with_ref_symbol_fires(tmp_path):
                    "active": True, "realtime": False, "kind": "rule"})
     fired = AlertEngine(db, store).run(update=True)
     assert len(fired) == 1
+
+
+def test_weekly_bar_closed_for_sunday_and_monday_stamps():
+    from datetime import datetime, timezone
+
+    from stockpulse.market_data import closed_bars
+
+    tuesday = datetime(2026, 9, 22, 15, tzinfo=timezone.utc)
+    for stamps in (["2026-09-13 04:00", "2026-09-20 04:00"], ["2026-09-14 04:00", "2026-09-21 04:00"]):   # Sunday / Monday
+        idx = pd.DatetimeIndex(stamps, tz="UTC")
+        df = pd.DataFrame({"open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0}, index=idx)
+        assert len(closed_bars(df, "1wk", now=tuesday)) == 1
+
+
+def test_stale_cache_triggers_full_fetch(tmp_path, monkeypatch):
+    import time
+
+    from stockpulse import market_data as md
+    from stockpulse.db import Database
+
+    s = settings(tmp_path, demo_mode=False)
+    store = md.BarStore(Database(s.db_path), s)
+    old = pd.DataFrame({"open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0},
+                       index=pd.DatetimeIndex([pd.Timestamp(time.time() - 10 * 86400, unit="s", tz="UTC")]))
+    store.save("AAPL", "5m", old)
+    calls = []
+    monkeypatch.setattr(md, "fetch_yfinance", lambda sym, iv, inc: calls.append(inc) or old.iloc[:0])
+    store.update("AAPL", "5m")
+    assert calls == [False]
+
+
+def test_ticker_extraction_ambiguous_parens_and_crypto():
+    from stockpulse.sources.social import parse_stocktwits
+    from stockpulse.tickers import extract_tickers
+
+    assert "AI" not in extract_tickers("Nvidia rallies on artificial intelligence (AI) demand")
+    assert "AI" in extract_tickers("C3.ai (NYSE: AI) jumps")
+    assert parse_stocktwits({"symbols": [{"symbol": "BTC.X"}, {"symbol": "TSLA"}]})[0].tickers == {"TSLA"}
+
+
+def test_single_ticker_download_multiindex():
+    from stockpulse.market import quotes_from_frame
+
+    idx = pd.date_range("2026-01-01", periods=30, freq="D")
+    cols = pd.MultiIndex.from_product([["AAPL"], ["Open", "High", "Low", "Close", "Volume"]])
+    df = pd.DataFrame(np.tile([1.0, 2.0, 0.5, 1.5, 1e6], (30, 1)), index=idx, columns=cols)
+    assert "AAPL" in quotes_from_frame(["AAPL"], df)
+
+
+def test_massive_retries_rate_limit(tmp_path, monkeypatch):
+    import httpx
+
+    from stockpulse import market_data as md
+
+    monkeypatch.setattr(md.time, "sleep", lambda s: None)
+    hits = []
+
+    def handler(req):
+        hits.append(1)
+        if len(hits) == 1:
+            return httpx.Response(429, json={"status": "ERROR"})
+        return httpx.Response(200, json={"results": [{"t": 1_700_000_000_000, "o": 1, "h": 1, "l": 1, "c": 1, "v": 1}]})
+
+    s = settings(tmp_path, massive_api_key="k")
+    df = md.fetch_massive("AAPL", "1d", True, s, client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert len(df) == 1 and len(hits) == 2
