@@ -82,15 +82,22 @@ const LAYOUTS = { "1": [1, 1, 1], "2": [2, 1, 2], "2v": [1, 2, 2], "3": [3, 1, 3
 const LAYOUT_LABEL = { "1": "1", "2": "2", "2v": "2↕", "3": "3", "4": "4", "6": "6", "8": "8" };
 const DEFAULT_SYMS = ["SPY", "QQQ", "AAPL", "NVDA", "MSFT", "TSLA", "AMZN", "META"];
 
-const saved = store.get("sp.multi", {});
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const saved = (v => v && typeof v === "object" ? v : {})(store.get("sp.multi", {}));
+const IV_KEYS = ["1m", "5m", "15m", "1h", "1d", "1wk"];
 const state = {
   layout: LAYOUTS[saved.layout] ? saved.layout : "4",
-  cells: Array.from({ length: 8 }, (_, i) => ({ symbol: DEFAULT_SYMS[i], interval: "1d", ...((saved.cells || [])[i] || {}) })),
+  cells: Array.from({ length: 8 }, (_, i) => {
+    const c = (Array.isArray(saved.cells) ? saved.cells[i] : null) || {};
+    return { symbol: typeof c.symbol === "string" && c.symbol ? c.symbol : DEFAULT_SYMS[i],
+             interval: IV_KEYS.includes(c.interval) ? c.interval : "1d" };
+  }),
   syncCross: saved.syncCross ?? true, syncIv: saved.syncIv ?? false, syncRange: saved.syncRange ?? false,
 };
 const save = () => store.set("sp.multi", { layout: state.layout, cells: state.cells, syncCross: state.syncCross, syncIv: state.syncIv, syncRange: state.syncRange });
 let views = [];
 let syncing = false;
+let rangeLeader = null;   // only the chart under the pointer drives time-range sync
 
 function chartOptions(interval) {
   return {
@@ -108,7 +115,7 @@ function makeView(i) {
   const el = document.createElement("div");
   el.className = "cell";
   el.innerHTML = `<div class="cell-head">
-      <input aria-label="代码" value="${cell.symbol}">
+      <input aria-label="代码" value="${esc(cell.symbol)}">
       <select aria-label="周期">${INTERVALS.map(([k, l]) => `<option value="${k}" ${k === cell.interval ? "selected" : ""}>${l}</option>`).join("")}</select>
       <span class="px"></span><span class="chg"></span>
       <a href="#" title="在完整图表中打开">↗</a>
@@ -135,7 +142,8 @@ function makeView(i) {
     cell.interval = sel.value; save();
     chart.applyOptions(chartOptions(cell.interval)); load(v, true);
   };
-  el.querySelector("a").onclick = (e) => { e.preventDefault(); location.href = `/chart?symbol=${encodeURIComponent(cell.symbol)}&interval=${cell.interval}`; };
+  el.querySelector("a").onclick = (e) => { e.preventDefault(); location.href = `/chart?symbol=${encodeURIComponent(cell.symbol)}&interval=${encodeURIComponent(cell.interval)}`; };
+  el.addEventListener("pointerenter", () => { rangeLeader = v; });
   el.addEventListener("mousedown", () => { views.forEach(o => o.el.classList.toggle("active", o === v)); });
   chart.subscribeCrosshairMove((p) => {
     legend(v, p && p.time != null ? v.byTime.get(p.time) : null);
@@ -149,7 +157,8 @@ function makeView(i) {
     syncing = false;
   });
   chart.timeScale().subscribeVisibleTimeRangeChange((r) => {
-    if (!state.syncRange || syncing || !r) return;
+    // range events fire asynchronously, so a re-entrancy flag cannot stop charts echoing each other
+    if (!state.syncRange || syncing || !r || rangeLeader !== v) return;
     syncing = true;
     views.forEach(o => { if (o !== v && o.bars.length) { try { o.chart.timeScale().setVisibleRange(r); } catch (e) {} } });
     syncing = false;
@@ -184,9 +193,10 @@ async function load(v, fit = false) {
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
     d = await res.json();
   } catch (e) {
-    v.el.querySelector(".cell-legend").textContent = "无法加载：" + e.message; return;
+    if (views.includes(v)) v.el.querySelector(".cell-legend").textContent = "无法加载：" + e.message;
+    return;
   }
-  if (cell.symbol !== d.symbol || cell.interval !== d.interval) return;   // changed while loading
+  if (!views.includes(v) || cell.symbol !== d.symbol || cell.interval !== d.interval) return;   // re-rendered or changed while loading
   v.bars = d.bars; v.byTime = new Map(d.bars.map(b => [b.time, b]));
   v.candles.setData(d.bars.map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
   v.volume.setData(d.bars.map(b => ({ time: b.time, value: b.volume, color: b.close >= b.open ? css("--up") + "55" : css("--down") + "55" })));

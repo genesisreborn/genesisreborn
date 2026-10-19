@@ -131,7 +131,15 @@ def run_script(src: str, df: pd.DataFrame, inputs: dict[str, float] | None = Non
                strict_refs: bool = True) -> dict:
     """Evaluate a script on bars -> {plots, hlines, shapes, inputs}."""
     sc = parse_script(src)
-    overrides = {k: float(v) for k, v in (inputs or {}).items() if k in sc.inputs}
+    overrides = {}
+    for k, v in (inputs or {}).items():
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if k in sc.inputs and math.isfinite(f):
+            overrides[k] = f
+    applied: set[str] = set()
     ev = Evaluator(df, refs=refs, strict_refs=strict_refs)
     reserved = set(ev.names) | set(ev.funcs) | {"plot", "hline", "plotshape"}
     plots, hlines, shapes = [], [], []
@@ -141,7 +149,8 @@ def run_script(src: str, df: pd.DataFrame, inputs: dict[str, float] | None = Non
                 name = st.targets[0].id
                 if name in reserved:
                     raise DSLError(f"{name!r} 是内置名称，换个变量名")
-                if name in overrides:
+                if name in overrides and name not in applied:   # only the declaring line is the input
+                    applied.add(name)
                     ev.names[name] = overrides[name]
                     continue
                 val = ev._ev(st.value)
@@ -163,8 +172,8 @@ def run_script(src: str, df: pd.DataFrame, inputs: dict[str, float] | None = Non
                 plots.append({"title": title, "color": color, "kind": kind, "data": _points(val)})
             elif fn == "hline":
                 v = ev._ev(args[0])
-                if not isinstance(v, (int, float)):
-                    raise DSLError("hline() 的值必须是数字")
+                if not isinstance(v, (int, float)) or not math.isfinite(v):
+                    raise DSLError("hline() 的值必须是有限的数字")
                 color = _str_arg(args[2], "颜色", no) if len(args) > 2 else None
                 if color and not COLOR_RE.match(color):
                     raise DSLError("颜色请用 #RRGGBB 格式")
@@ -183,7 +192,7 @@ def run_script(src: str, df: pd.DataFrame, inputs: dict[str, float] | None = Non
         except DSLError as exc:
             msg = str(exc)
             raise DSLError(msg if msg.startswith("第 ") else f"第 {no} 行：{msg}") from exc
-        except (TypeError, ValueError, ZeroDivisionError) as exc:
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError, MemoryError, RecursionError) as exc:
             raise DSLError(f"第 {no} 行：{exc}") from exc
     return {"plots": plots, "hlines": hlines, "shapes": shapes,
             "inputs": {k: overrides.get(k, v) for k, v in sc.inputs.items()}}

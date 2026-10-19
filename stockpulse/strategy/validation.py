@@ -23,7 +23,8 @@ DEFAULT_SYMBOLS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META"
 
 
 def _bh(df: pd.DataFrame, start: pd.Timestamp) -> float:
-    sub = df["close"][df.index >= start]
+    pos = max(int(df.index.searchsorted(start)) - 1, 0)   # same base as window_metrics: the close before start
+    sub = df["close"].iloc[pos:]
     return round((sub.iloc[-1] / sub.iloc[0] - 1) * 100, 2) if len(sub) > 1 else 0.0
 
 

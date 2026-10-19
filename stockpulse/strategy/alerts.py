@@ -8,7 +8,8 @@ from datetime import datetime
 from ..db import Database
 from ..market_data import INTERVALS, BarStore, closed_bars
 from . import SYMBOL_RE
-from .dsl import DSLError, Evaluator, validate
+from .dsl import DSLError, Evaluator, referenced_symbols, validate
+from .refs import load_symbols
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +83,8 @@ class AlertEngine:
             if a.last_bar_ts == bar_ts:
                 continue  # already evaluated this bar
             try:
-                hit = bool(Evaluator(bars).eval(a.condition).iloc[-1])
+                refs = load_symbols(self.store, referenced_symbols(a.condition), a.interval, ALERT_BARS + 50, update)
+                hit = bool(Evaluator(bars, refs=refs).eval(a.condition).iloc[-1])
             except DSLError as exc:
                 log.warning("alert #%s invalid: %s", a.id, exc)
                 continue

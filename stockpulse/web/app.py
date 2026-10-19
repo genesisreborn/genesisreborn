@@ -32,7 +32,7 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
 
     app = FastAPI(title="StockPulse", lifespan=lifespan)
     app.state.engine = engine
-    refreshing = threading.Event()
+    refreshing = threading.Lock()
 
     @app.get("/")
     def index():
@@ -57,8 +57,8 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
     def snapshot():
         snap = engine.db.latest_snapshot()
         if not snap:
-            return {"generated_at": None, "ranking": [], "watchlist": [], "refreshing": refreshing.is_set()}
-        return {**snap, "refreshing": refreshing.is_set()}
+            return {"generated_at": None, "ranking": [], "watchlist": [], "refreshing": refreshing.locked()}
+        return {**snap, "refreshing": refreshing.locked()}
 
     @app.get("/api/stock/{ticker}")
     def stock(ticker: str):
@@ -89,18 +89,18 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
         }
 
     @app.post("/api/refresh")
-    def refresh():
-        if refreshing.is_set():
+    def refresh(_=Depends(token_dep)):
+        # refresh sends Telegram alerts, so it needs the token like other mutating routes
+        if not refreshing.acquire(blocking=False):
             return {"started": False, "reason": "already running"}
 
         def run():
-            refreshing.set()
             try:
                 engine.refresh()
             except Exception:  # noqa: BLE001 - logged by engine
                 pass
             finally:
-                refreshing.clear()
+                refreshing.release()
 
         threading.Thread(target=run, daemon=True).start()
         return {"started": True}
@@ -146,7 +146,7 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
         return rep
 
     @app.post("/api/telegram/test")
-    def telegram_test():
+    def telegram_test(_=Depends(token_dep)):
         if not settings.telegram_enabled:
             raise HTTPException(400, "TELEGRAM_BOT_TOKEN not configured")
         return {"sent": engine.notifier.send_report()}

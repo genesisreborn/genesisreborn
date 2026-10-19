@@ -15,6 +15,8 @@ def ema(s: pd.Series, n: int = 20) -> pd.Series:
 
 def wma(s: pd.Series, n: int = 20) -> pd.Series:
     n = int(n)
+    if n > len(s):   # not enough bars; also avoids allocating a huge weight vector
+        return pd.Series(np.nan, index=s.index)
     w = np.arange(1, n + 1, dtype=float)
     return s.rolling(n, min_periods=n).apply(lambda x: float(np.dot(x, w) / w.sum()), raw=True)
 
@@ -154,7 +156,8 @@ def mfi(df: pd.DataFrame, n: int = 14) -> pd.Series:
     flow = tp * df["volume"]
     pos = flow.where(tp > tp.shift(1), 0.0).rolling(n, min_periods=n).sum()
     neg = flow.where(tp < tp.shift(1), 0.0).rolling(n, min_periods=n).sum()
-    return 100 - 100 / (1 + pos / neg.replace(0, np.nan))
+    out = 100 - 100 / (1 + pos / neg.replace(0, np.nan))
+    return out.where(neg != 0, 100.0).where(pos.notna() & neg.notna())
 
 
 def roc(s: pd.Series, n: int = 12) -> pd.Series:

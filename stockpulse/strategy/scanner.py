@@ -60,7 +60,8 @@ def scan(store: BarStore, cfg: StrategyConfig, symbols: list[str], commission_bp
     # Sort: fresh entry signals first, then open positions, then by backtest return
     def key(r):
         entry = any(p["action"] in ("BUY", "SHORT") for p in r.get("pending", []))
-        return (0 if entry else 1 if r.get("position") else 2, -(r.get("total_return_pct") or -1e9))
+        ret = r.get("total_return_pct")
+        return (0 if entry else 1 if r.get("position") else 2, -(ret if ret is not None else -1e9))
     rows.sort(key=lambda r: (1, 0) if "error" in r else (0, *key(r)))
 
     summary = {"symbols": len(symbols), "ok": len(ok)}

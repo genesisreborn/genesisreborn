@@ -216,7 +216,7 @@ def run_backtest(df: pd.DataFrame, cfg: StrategyConfig, commission_bps: float = 
         res.stop, res.target = stop, target
         # mark the open trade for reporting (not counted in closed-trade stats)
         open_trade = Trade(trade.side, trade.entry_time, trade.entry_price, exit_reason="open",
-                           pnl_pct=((c[-1] / trade.entry_price - 1) * pos) * 100, bars=n - 1 - entry_i)
+                           pnl_pct=((c[-1] / trade.entry_price - 1) * pos) * 100, bars=n - entry_i)
         res.trades.append(open_trade)
     res.metrics = summarize(res, df, cfg, initial_capital)
     return res

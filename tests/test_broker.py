@@ -11,9 +11,11 @@ from stockpulse.db import Database
 
 
 class FakeAlpaca:
-    def __init__(self, equity=100_000, positions=None):
+    def __init__(self, equity=100_000, positions=None, open_orders=None, queue_orders=False):
         self.equity = equity
         self.positions = positions or []
+        self.open_orders = open_orders or []
+        self.queue_orders = queue_orders     # True: submitted orders stay open (market closed)
         self.calls = []
 
     def handler(self, req: httpx.Request):
@@ -24,10 +26,19 @@ class FakeAlpaca:
             return httpx.Response(200, json={"equity": str(self.equity), "cash": "50000", "buying_power": "100000", "status": "ACTIVE"})
         if path == "/v2/positions" and req.method == "GET":
             return httpx.Response(200, json=self.positions)
+        if path == "/v2/orders" and req.method == "GET":
+            return httpx.Response(200, json=self.open_orders)
         if path == "/v2/orders" and req.method == "POST":
             if any(c[2] and c[2].get("client_order_id") == body["client_order_id"] for c in self.calls[:-1]):
                 return httpx.Response(422, json={"message": "client_order_id must be unique"})
-            return httpx.Response(200, json={"id": "ord-1", **body})
+            o = {"id": f"ord-{len(self.calls)}", **body}
+            if self.queue_orders:
+                self.open_orders.append(o)
+            return httpx.Response(200, json=o)
+        if path.startswith("/v2/orders/") and req.method == "DELETE":
+            oid = path.rsplit("/", 1)[1]
+            self.open_orders = [o for o in self.open_orders if o["id"] != oid]
+            return httpx.Response(204)
         if path.startswith("/v2/positions/") and req.method == "DELETE":
             return httpx.Response(200, json={"id": "close-1"})
         if path == "/v2/orders" and req.method == "DELETE":
@@ -64,7 +75,8 @@ def test_buy_is_capped_and_carries_stop(tmp_path):
     assert rec["status"] == "submitted" and rec["qty"] == 5     # floor(1000 / 200)
     order = fake.posted_orders()[0]
     assert order == {"symbol": "AAPL", "qty": "5", "side": "buy", "type": "market", "time_in_force": "day",
-                     "client_order_id": "sp-1-buy", "order_class": "oto", "stop_loss": {"stop_price": "190.00"}}
+                     "client_order_id": f"{ex.coid_prefix}-1-buy", "order_class": "oto", "stop_loss": {"stop_price": "190.00"}}
+    assert ex.coid_prefix.startswith("sp") and len(ex.coid_prefix) == 8
     headers = fake.calls[0][3]
     assert headers["apca-api-key-id"] == "KEY" and "paper-api" in str(ex.client.base)
 
@@ -76,7 +88,6 @@ def test_risk_gate_rejections(tmp_path):
     assert "做空" in ex.execute(sig("SHORT"), ["AAPL"], 10)["detail"]
     assert "不够买 1 股" in ex.execute(sig(price=5000), ["AAPL"], 10)["detail"]
     assert ex.execute(sig("SELL"), ["AAPL"], 10)["status"] == "skipped"          # nothing to sell
-    assert ex.execute({**sig(), "reason": "stop"}, ["AAPL"], 10)["status"] == "skipped"
     # daily cap
     ex.execute(sig(sid=10), ["AAPL"], 10)
     ex.execute(sig(sid=11, symbol="MSFT"), ["AAPL", "MSFT"], 10)
@@ -92,6 +103,10 @@ def test_live_mode_needs_confirmation_token_and_respects_pause(tmp_path):
     assert ex.client.base == "https://api.alpaca.markets"
     ex.set_paused(True)
     assert ex.execute(sig(), ["AAPL"], 10)["detail"] == "自动交易已暂停"
+    # pause blocks entries only: an exit still goes through
+    fake.positions = [{"symbol": "AAPL", "qty": "3"}]
+    assert ex.execute(sig("SELL", sid=50), ["AAPL"], 10)["status"] == "submitted"
+    fake.positions = []
     ex.set_paused(False)
     s.report_api_token = ""
     assert "API_TOKEN" in ex.execute(sig(), ["AAPL"], 10)["detail"]
@@ -104,7 +119,7 @@ def test_exit_closes_position_and_duplicates_are_ignored(tmp_path):
     rec = ex.execute(sig("SELL", sid=3), ["AAPL"], 10)
     assert rec["status"] == "submitted" and rec["qty"] == 5
     assert ("DELETE", "/v2/positions/AAPL") in [(c[0], c[1]) for c in fake.calls]
-    assert ex.execute(sig("BUY", sid=4), ["AAPL"], 10)["detail"] == "已持有该代码"
+    assert ex.execute(sig("BUY", sid=4), ["AAPL"], 10)["detail"].startswith("已持有该代码")
 
     fake.positions = []
     assert ex.execute(sig(sid=5), ["AAPL"], 10)["status"] == "submitted"
@@ -114,7 +129,7 @@ def test_exit_closes_position_and_duplicates_are_ignored(tmp_path):
 def test_position_cap_and_flatten(tmp_path):
     fake = FakeAlpaca(positions=[{"symbol": s, "qty": "1"} for s in ("A", "B")])
     ex, s = make(tmp_path, fake, max_open_positions=2)
-    assert "持仓数已达上限" in ex.execute(sig(), ["AAPL"], 10)["detail"]
+    assert "已达上限" in ex.execute(sig(), ["AAPL"], 10)["detail"]
     out = ex.flatten_all()
     assert out["ok"] and out["closed"] == ["A", "B"] and ex.paused
 
@@ -147,7 +162,7 @@ def test_engine_routes_broker_signals_and_api(tmp_path):
     sid = eng.db.save_strategy(cfg.to_dict())
     eng.signals.run = lambda: [{**sig(sid=77), "strategy_id": sid, "execution": "broker", "alloc_pct": 5, "symbols": ["AAPL"]}]
     eng.run_signals()
-    assert fake.posted_orders()[0]["client_order_id"] == "sp-77-buy"
+    assert fake.posted_orders()[0]["client_order_id"] == f"{eng.broker.coid_prefix}-77-buy"
 
     auth = {"Authorization": "Bearer tok"}
     with TestClient(app) as c:
@@ -166,3 +181,54 @@ def test_broker_risk_sizing(tmp_path):
     # 0.5% of 100k = $500 risk, stop $10 below -> 50 shares ($10k), under the 20% / $50k caps
     rec = ex.execute(sig(price=200.0, stop=190.0, risk_pct=0.5), ["AAPL"], alloc_pct=20)
     assert rec["qty"] == 50
+
+
+def test_unfilled_entries_count_toward_caps(tmp_path):
+    fake = FakeAlpaca(queue_orders=True)           # after hours: market orders stay queued
+    ex, _ = make(tmp_path, fake, max_open_positions=2, max_daily_orders=10)
+    syms = ["AAPL", "MSFT", "NVDA"]
+    assert ex.execute(sig(sid=1), syms, 10)["status"] == "submitted"
+    assert ex.execute(sig(sid=2), syms, 10)["detail"].startswith("已持有该代码")          # same symbol queued
+    assert ex.execute(sig(sid=3, symbol="MSFT"), syms, 10)["status"] == "submitted"
+    assert "已达上限" in ex.execute(sig(sid=4, symbol="NVDA"), syms, 10)["detail"]
+    assert len(fake.posted_orders()) == 2
+    # exit before the entry fills cancels the queued entry
+    rec = ex.execute(sig("SELL", sid=5), syms, 10)
+    assert rec["status"] == "submitted" and "撤销" in rec["detail"]
+    assert [o["symbol"] for o in fake.open_orders] == ["MSFT"]
+
+
+def test_exits_cancel_resting_stop_and_stop_exit_left_to_broker(tmp_path):
+    stop_leg = {"id": "stop-1", "symbol": "AAPL", "type": "stop", "side": "sell"}
+    fake = FakeAlpaca(positions=[{"symbol": "AAPL", "qty": "5"}], open_orders=[dict(stop_leg)])
+    ex, _ = make(tmp_path, fake)
+    # strategy stop with a broker stop resting -> leave it to the broker
+    assert ex.execute(sig("SELL", sid=1, reason="stop"), ["AAPL"], 10)["status"] == "skipped"
+    # take-profit / normal exit -> cancel the stop leg, then close
+    rec = ex.execute(sig("SELL", sid=2, reason="take_profit"), ["AAPL"], 10)
+    assert rec["status"] == "submitted"
+    paths = [(c[0], c[1]) for c in fake.calls]
+    assert paths.index(("DELETE", "/v2/orders/stop-1")) < paths.index(("DELETE", "/v2/positions/AAPL"))
+    # strategy stop with NO broker stop (e.g. entry without stop) -> close it ourselves
+    fake.open_orders = []
+    assert ex.execute(sig("SELL", sid=3, reason="stop"), ["AAPL"], 10)["status"] == "submitted"
+
+
+def test_short_entry_carries_stop(tmp_path):
+    fake = FakeAlpaca()
+    ex, _ = make(tmp_path, fake, allow_short=True)
+    assert ex.execute(sig("SHORT", stop=210.0), ["AAPL"], 10)["status"] == "submitted"
+    assert fake.posted_orders()[0]["stop_loss"] == {"stop_price": "210.00"} and fake.posted_orders()[0]["side"] == "sell"
+    # stop on the wrong side is dropped instead of sending an order Alpaca would reject
+    ex2, _ = make(tmp_path / "x", FakeAlpaca(), allow_short=True) if (tmp_path / "x").mkdir() is None else (None, None)
+    rec = ex2.execute(sig("BUY", sid=2, stop=205.0), ["AAPL"], 10)
+    assert rec["status"] == "submitted" and "附止损" not in rec["detail"]
+
+
+def test_unexpected_response_is_logged_not_raised(tmp_path):
+    def handler(req):
+        return httpx.Response(200, content=b"<html>proxy</html>")
+    s = make(tmp_path, FakeAlpaca())[1]
+    ex = BrokerExecutor(Database(s.db_path), s, client=AlpacaClient(s, client=httpx.Client(transport=httpx.MockTransport(handler))))
+    rec = ex.execute(sig(), ["AAPL"], 10)
+    assert rec["status"] == "error" and "JSONDecodeError" in rec["detail"]

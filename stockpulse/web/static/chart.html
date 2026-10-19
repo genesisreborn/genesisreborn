@@ -579,7 +579,7 @@ const ACTION = { BUY: ["买入", "up"], SELL: ["卖出", "down"], SHORT: ["卖�
 const REASON = { signal: "信号", stop: "止损", take_profit: "止盈", reverse: "反手", open: "持仓中" };
 
 function migrateInds(v) {
-  if (Array.isArray(v)) return v;
+  if (Array.isArray(v)) return v.filter(i => i && typeof i === "object" && typeof i.type === "string" && i.id);
   // old format: {ema: "20", ema2: "50", rsi: "14"}
   return Object.entries(v || {}).map(([k, a], i) => ({ id: "i" + (i + 1), type: k === "ema2" ? "ema" : k, args: a, color: null }));
 }
@@ -587,7 +587,7 @@ const state = {
   symbol: store.get("sp.symbol", "AAPL"), interval: store.get("sp.interval", "1d"),
   inds: migrateInds(store.get("sp.inds", [{ id: "i1", type: "ema", args: "20" }, { id: "i2", type: "ema", args: "50" }, { id: "i3", type: "rsi", args: "14" }])),
   chartType: store.get("sp.chartType", "candles"), scale: store.get("sp.scale", "normal"),
-  compares: store.get("sp.compares", []), replay: null,
+  compares: (a => Array.isArray(a) ? a.filter(x => typeof x === "string") : [])(store.get("sp.compares", [])), replay: null,
   backtest: null, editingId: null, meta: null, strategies: [],
 };
 
@@ -705,19 +705,25 @@ function sliceForReplay(data) {
            signals: (data.signals || []).filter(x => x.bar_ts <= cut) };
 }
 
-async function loadChart({ keepRange = false } = {}) {
-  if (state.replay && keepRange) return;          // no live refresh while replaying
+let chartGen = 0;
+async function loadChart({ keepRange = false, live = false } = {}) {
+  if (state.replay && live) return;               // no timer refresh while replaying
+  const gen = ++chartGen, sym = state.symbol, iv = state.interval;
+  const current = () => gen === chartGen && sym === state.symbol && iv === state.interval;
   $("chartMsg").textContent = keepRange ? "" : "加载中…";
   let data;
   try {
-    const q = new URLSearchParams({ symbol: state.symbol, interval: state.interval, limit: 2000, indicators: indicatorSpecs().join(",") });
+    const q = new URLSearchParams({ symbol: sym, interval: iv, limit: 2000, indicators: indicatorSpecs().join(",") });
     data = await api("/api/chart?" + q);
-  } catch (e) { $("chartMsg").textContent = "无法加载：" + e.message; return; }
+  } catch (e) { if (current()) $("chartMsg").textContent = "无法加载：" + e.message; return; }
+  if (!current()) return;                         // a newer symbol / interval was requested meanwhile
+  const cmp = await fetchCompares(iv);
+  if (!current()) return;
+  compareData = cmp;
   $("chartMsg").textContent = (data.script_errors || []).length ? "脚本错误：" + data.script_errors.join("；") : "";
   data.shapes = data.series.filter(x => x.kind === "shape");
   data.series = data.series.filter(x => x.kind !== "shape");
   fullData = data;
-  await loadCompares();
   render({ keepRange });
   const l = data.last;
   $("qPx").textContent = fmt(l.price, l.price < 10 ? 4 : 2);
@@ -727,14 +733,27 @@ async function loadChart({ keepRange = false } = {}) {
   document.title = `${data.symbol} ${fmt(l.price)} · StockPulse`;
 }
 
-async function loadCompares() {
-  compareData = new Map();
+async function fetchCompares(iv) {
+  const out = new Map();
   await Promise.all(state.compares.map(async sym => {
     try {
-      const d = await api("/api/chart?" + new URLSearchParams({ symbol: sym, interval: state.interval, limit: 2000 }));
-      compareData.set(sym, d.bars.map(b => ({ time: b.time, value: b.close })));
+      const d = await api("/api/chart?" + new URLSearchParams({ symbol: sym, interval: iv, limit: 2000 }));
+      out.set(sym, d.bars.map(b => ({ time: b.time, value: b.close })));
     } catch (e) { /* ignore a bad compare symbol */ }
   }));
+  return out;
+}
+
+// Snap another symbol's points onto the main bar times (last value at or before each bar), so the
+// chart's time axis - and the drawings' logical index mapping - stays the main symbol's bars.
+function alignToBars(pts, bars) {
+  const out = [];
+  let j = 0, last = null;
+  for (const b of bars) {
+    while (j < pts.length && pts[j].time <= b.time) last = pts[j++].value;
+    if (last != null) out.push({ time: b.time, value: last });
+  }
+  return out;
 }
 
 function render({ keepRange = false } = {}) {
@@ -753,7 +772,6 @@ function render({ keepRange = false } = {}) {
   // compare symbols: same pane, percentage scale
   const cmpSlots = ["--s6", "--s8", "--s5", "--s3"];
   let ci = 0;
-  const cut = data.bars.length ? data.bars[data.bars.length - 1].time : Infinity;
   for (const [sym, pts] of compareData) {
     let ser = compareSeries.get(sym);
     if (!ser) {
@@ -761,7 +779,7 @@ function render({ keepRange = false } = {}) {
       ser._meta = { name: sym, color: css(cmpSlots[ci % cmpSlots.length]), pane: "price" };
       compareSeries.set(sym, ser);
     }
-    ser.setData(pts.filter(p => p.time <= cut));
+    ser.setData(alignToBars(pts, data.bars));
     ci++;
   }
 
@@ -937,7 +955,7 @@ $("cmpBtn").onclick = async () => {
     s.split(/[,\s]+/).filter(Boolean).forEach(x => { if (x !== state.symbol && !state.compares.includes(x)) state.compares.push(x); });
     state.compares = state.compares.slice(0, 4);
   }
-  store.set("sp.compares", state.compares); renderScaleBtns(); lastData = null; await loadCompares(); render();
+  store.set("sp.compares", state.compares); renderScaleBtns(); lastData = null; compareData = await fetchCompares(state.interval); render();
 };
 
 // ---------------------------------------------------------------- replay
@@ -1225,8 +1243,12 @@ $("scSave").onclick = async () => {
 let chainData = null;
 async function loadChain(expiry) {
   $("chInfo").textContent = "加载中…";
-  try { chainData = await api("/api/options?" + new URLSearchParams({ symbol: state.symbol, ...(expiry ? { expiry } : {}) })); }
-  catch (e) { chainData = null; $("chInfo").textContent = e.message; $("chTable").innerHTML = ""; $("chStats").innerHTML = ""; return; }
+  const sym = state.symbol;
+  let d;
+  try { d = await api("/api/options?" + new URLSearchParams({ symbol: sym, ...(expiry ? { expiry } : {}) })); }
+  catch (e) { if (sym === state.symbol) { chainData = null; $("chInfo").textContent = e.message; $("chTable").innerHTML = ""; $("chStats").innerHTML = ""; } return; }
+  if (sym !== state.symbol) return;
+  chainData = d;
   renderChain();
 }
 function renderChain() {
@@ -1809,7 +1831,7 @@ loadScripts();
 const tab = store.get("sp.tab", "watch"); const tb = document.querySelector(`.tabs button[data-tab="${tab}"]`); if (tb) tb.click();
 
 // Live updates: chart every 30s (the server throttles provider pulls); watchlist every minute.
-setInterval(() => { if (!document.hidden) loadChart({ keepRange: true }); }, 30000);
+setInterval(() => { if (!document.hidden) loadChart({ keepRange: true, live: true }); }, 30000);
 setInterval(() => { if (!document.hidden) loadWatch(); }, 60000);
 setInterval(() => { if (!document.hidden && $("tab-signals").classList.contains("on")) loadSignals(); }, 60000);
 </script>

@@ -7,10 +7,15 @@ Safety model (all must pass before any order is sent):
 3. API_TOKEN is set (so nobody can change strategies over the web without it) and
    the kill switch (dashboard / Telegram /pause) is off.
 4. Only strategies with execution="broker", only their listed symbols.
-5. Per-order notional cap, daily order cap, open position cap, shorts off by default.
-6. client_order_id is derived from the signal id, so a retry can never double-submit.
-Orders are market orders; long entries carry a broker-side stop (OTO) when the
-strategy has a stop, so protection does not depend on this program staying up.
+5. Per-order notional cap, daily order cap, open position cap (filled positions plus
+   unfilled entry orders), shorts off by default.
+6. client_order_id is derived from a per-install prefix and the signal id, so a retry
+   can never double-submit.
+The kill switch blocks new entries only; exits still go through so a paused account is
+never left holding positions the strategy has already closed.
+Orders are market orders; entries carry a broker-side stop (OTO) when the strategy has a
+stop, so protection does not depend on this program staying up. A strategy stop exit is
+left to that resting stop order; any other exit cancels the symbol's open orders first.
 """
 from __future__ import annotations
 
@@ -69,6 +74,12 @@ class AlpacaClient:
 
     def orders(self, limit: int = 50) -> list[dict]:
         return self._req("GET", "/v2/orders", params={"status": "all", "limit": limit, "direction": "desc"})
+
+    def open_orders(self) -> list[dict]:
+        return self._req("GET", "/v2/orders", params={"status": "open", "limit": 500, "nested": "true"})
+
+    def cancel_order(self, order_id: str) -> None:
+        self._req("DELETE", f"/v2/orders/{order_id}")
 
     def submit_order(self, symbol: str, qty: int, side: str, client_order_id: str, stop_price: float | None = None) -> dict:
         body = {"symbol": symbol, "qty": str(qty), "side": side, "type": "market", "time_in_force": "day",
@@ -130,6 +141,18 @@ class BrokerExecutor:
             return "自动交易已暂停"
         return None
 
+    @property
+    def coid_prefix(self) -> str:
+        """Per-install prefix: Alpaca keeps client_order_id unique per account forever, and
+        signal ids restart at 1 in a fresh database."""
+        p = self.db.get_kv("broker_coid_prefix")
+        if not p:
+            import secrets
+
+            p = "sp" + secrets.token_hex(3)
+            self.db.set_kv("broker_coid_prefix", p)
+        return p
+
     def orders_today(self) -> int:
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         r = self.db.query("SELECT COUNT(*) AS n FROM broker_orders WHERE status='submitted' AND action IN ('BUY','SHORT')"
@@ -150,40 +173,63 @@ class BrokerExecutor:
 
     # ------------------------------------------------------------ execution
     def execute(self, sig: dict, symbols_allowed: list[str], alloc_pct: float) -> dict:
-        """Turn one live signal into a broker order, or explain why not."""
-        if sig.get("reason") in ("stop", "take_profit"):
-            # Broker-side OTO stops handle protective exits; the strategy's simulated stop is informational.
-            return self._log(sig, "skipped", detail="止损/止盈由券商端止损单处理")
+        """Turn one live signal into a broker order, or explain why not. Never raises."""
+        try:
+            return self._execute(sig, symbols_allowed, alloc_pct)
+        except Exception as exc:  # noqa: BLE001 - one bad response must not drop the remaining signals
+            log.exception("broker execute failed")
+            return self._log(sig, "error", detail=f"{type(exc).__name__}: {exc}")
+
+    @staticmethod
+    def _is_protective(o: dict) -> bool:
+        return o.get("type") in ("stop", "stop_limit", "trailing_stop")
+
+    def _execute(self, sig: dict, symbols_allowed: list[str], alloc_pct: float) -> dict:
+        action = sig["action"]
+        is_exit = action in ("SELL", "COVER")
         reason = self.blocked_reason()
-        if reason:
+        # the kill switch only blocks new positions; exits must still reach the broker
+        if reason and not (is_exit and reason == "自动交易已暂停"):
             return self._log(sig, "rejected", detail=reason)
         s = self.settings
         sym = sig["symbol"]
         if sig.get("id") and self.db.query("SELECT 1 FROM broker_orders WHERE signal_id=? AND action=? AND status='submitted'",
-                                           (sig["id"], sig["action"])):
+                                           (sig["id"], action)):
             return self._log(sig, "skipped", detail="重复提交，已忽略")
         if sym not in symbols_allowed:
             return self._log(sig, "rejected", detail="代码不在策略的监控列表里")
-        if sig["action"] in ("BUY", "SHORT") and self.orders_today() >= s.max_daily_orders:
+        if action in ("BUY", "SHORT") and self.orders_today() >= s.max_daily_orders:
             return self._log(sig, "rejected", detail=f"已达每日下单上限 {s.max_daily_orders}")
-        if sig["action"] == "SHORT" and not s.allow_short:
+        if action == "SHORT" and not s.allow_short:
             return self._log(sig, "rejected", detail="未开启做空（ALLOW_SHORT=false）")
-        coid = f"sp-{sig.get('id') or int(datetime.now().timestamp())}-{sig['action'].lower()}"
+        coid = f"{self.coid_prefix}-{sig.get('id') or int(datetime.now().timestamp())}-{action.lower()}"
         try:
             positions = {p["symbol"]: p for p in self.client.positions()}
             held = positions.get(sym)
             held_qty = float(held["qty"]) if held else 0.0
+            open_orders = self.client.open_orders()
+            sym_orders = [o for o in open_orders if o.get("symbol") == sym]
 
-            if sig["action"] in ("SELL", "COVER"):
-                if (sig["action"] == "SELL" and held_qty <= 0) or (sig["action"] == "COVER" and held_qty >= 0):
+            if is_exit:
+                if (action == "SELL" and held_qty <= 0) or (action == "COVER" and held_qty >= 0):
+                    pending = [o for o in sym_orders if not self._is_protective(o)]
+                    if pending:   # entry not filled yet (e.g. queued for the open): cancel it instead
+                        for o in sym_orders:
+                            self.client.cancel_order(o["id"])
+                        return self._log(sig, "submitted", coid=coid, detail="撤销未成交的开仓单")
                     return self._log(sig, "skipped", detail="券商账户里没有对应持仓")
+                if sig.get("reason") == "stop" and any(self._is_protective(o) for o in sym_orders):
+                    return self._log(sig, "skipped", detail="止损由券商端止损单处理")
+                for o in sym_orders:   # free the shares held by the resting stop before closing
+                    self.client.cancel_order(o["id"])
                 o = self.client.close_position(sym)
                 return self._log(sig, "submitted", qty=abs(held_qty), broker_id=o.get("id"), coid=coid, detail="平仓")
 
-            if held_qty != 0:
-                return self._log(sig, "skipped", detail="已持有该代码")
-            if len(positions) >= s.max_open_positions:
-                return self._log(sig, "rejected", detail=f"持仓数已达上限 {s.max_open_positions}")
+            pending_entries = {o.get("symbol") for o in open_orders if not self._is_protective(o)}
+            if held_qty != 0 or sym in pending_entries:
+                return self._log(sig, "skipped", detail="已持有该代码（或开仓单还没成交 / 反手要等平仓成交后的下一个信号）")
+            if len(set(positions) | pending_entries) >= s.max_open_positions:
+                return self._log(sig, "rejected", detail=f"持仓数（含未成交开仓单）已达上限 {s.max_open_positions}")
             acct = self.client.account()
             if acct.get("trading_blocked") or acct.get("account_blocked"):
                 return self._log(sig, "rejected", detail="券商账户被限制交易")
@@ -195,8 +241,10 @@ class BrokerExecutor:
             qty = int(math.floor(notional / price)) if price > 0 else 0
             if qty < 1:
                 return self._log(sig, "rejected", detail=f"金额 {notional:.0f} 不够买 1 股（价格 {price}）")
-            stop = sig.get("stop") if sig["action"] == "BUY" else None
-            side = "buy" if sig["action"] == "BUY" else "sell"
+            stop = sig.get("stop")
+            if stop and ((action == "BUY" and stop >= price) or (action == "SHORT" and stop <= price)):
+                stop = None   # a stop on the wrong side of the market would be rejected or fire at once
+            side = "buy" if action == "BUY" else "sell"
             o = self.client.submit_order(sym, qty, side, coid, stop_price=stop)
             return self._log(sig, "submitted", qty=qty, broker_id=o.get("id"), coid=coid,
                              detail=f"市价单{'，附止损 ' + str(stop) if stop else ''}")

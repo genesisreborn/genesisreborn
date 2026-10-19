@@ -13,6 +13,7 @@ functions are allowed - no attribute access, imports or arbitrary calls.
 from __future__ import annotations
 
 import ast
+import math
 import operator
 from typing import Any, Callable
 
@@ -24,6 +25,10 @@ from .. import indicators as ind
 
 class DSLError(ValueError):
     pass
+
+
+# Upper bound for numeric function arguments and [n] shifts (lengths, periods).
+MAX_NUMERIC_ARG = 1_000_000
 
 
 def _series(x, index) -> pd.Series:
@@ -166,16 +171,29 @@ class Evaluator:
         return ref[col].astype(float).reindex(self.idx, method="ffill")
 
     def eval(self, expr: str) -> pd.Series:
-        tree = parse(expr)
-        out = self._ev(tree.body)
-        return _bool(out, self.idx)
+        return _bool(self._ev(parse(expr).body), self.idx)
 
     def eval_value(self, expr: str) -> pd.Series:
         return _series(self._ev(parse(expr).body), self.idx)
 
     def _ev(self, node: ast.AST):
+        """Evaluate a node; numeric blow-ups from user input surface as DSLError."""
+        try:
+            return self._ev_node(node)
+        except DSLError:
+            raise
+        except RecursionError as exc:
+            raise DSLError("表达式嵌套太深") from exc
+        except (ValueError, OverflowError, MemoryError, ZeroDivisionError) as exc:
+            raise DSLError(f"数值错误：{exc}") from exc
+
+    def _ev_node(self, node: ast.AST):
         if isinstance(node, ast.Constant):
-            if isinstance(node.value, bool) or isinstance(node.value, (int, float)):
+            if isinstance(node.value, bool):
+                return node.value
+            if isinstance(node.value, (int, float)):
+                if not math.isfinite(node.value) or abs(node.value) > 1e15:
+                    raise DSLError(f"数字 {node.value!r} 超出范围")
                 return node.value
             raise DSLError(f"不支持的常量 {node.value!r}")
         if isinstance(node, ast.Name):
@@ -218,6 +236,9 @@ class Evaluator:
             if node.keywords:
                 raise DSLError("函数参数请按位置传入，例如 ema(close, 20)")
             args = [self._ev(a) for a in node.args]
+            for a in args:   # lengths / shifts: keep them sane so nothing allocates gigabytes
+                if isinstance(a, (int, float)) and not isinstance(a, bool) and abs(a) > MAX_NUMERIC_ARG:
+                    raise DSLError(f"{node.func.id}() 的参数 {a:g} 太大（上限 {MAX_NUMERIC_ARG:g}）")
             try:
                 return self.funcs[node.func.id](*args)
             except TypeError as exc:
@@ -225,7 +246,7 @@ class Evaluator:
         if isinstance(node, ast.Subscript):
             base = _series(self._ev(node.value), self.idx)
             n = self._ev(node.slice)
-            if not isinstance(n, (int, float)) or n < 0:
+            if not isinstance(n, (int, float)) or n < 0 or n > MAX_NUMERIC_ARG:
                 raise DSLError("[n] 只能是非负整数（n 根 K 线之前）")
             return base.shift(int(n))
         if isinstance(node, ast.IfExp):
@@ -244,6 +265,8 @@ def parse(expr: str) -> ast.Expression:
         return ast.parse(expr, mode="eval")
     except SyntaxError as exc:
         raise DSLError(f"语法错误：{exc.msg}（第 {exc.offset} 个字符附近）") from exc
+    except (ValueError, RecursionError, MemoryError) as exc:   # null bytes, absurd nesting
+        raise DSLError("表达式无法解析") from exc
 
 
 def validate(expr: str, params: dict | None = None) -> None:

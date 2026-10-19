@@ -134,11 +134,11 @@ python -m stockpulse validate --symbols SPY,QQQ,AAPL --strategies donchian_break
 4. 真要用真钱：换成实盘 Key，设 `ALPACA_PAPER=false`，**并且**设 `LIVE_TRADING_CONFIRM=I_UNDERSTAND_REAL_MONEY`。少了最后这一行，实盘模式会拒绝所有下单。
 
 保护措施（全部通过才会下单）：
-- 只交易策略里列出的代码；单笔金额 ≤ `MAX_ORDER_NOTIONAL`（默认 $1000，再乘以“每笔占账户 %”取较小值）；每天开仓 ≤ `MAX_DAILY_ORDERS`；同时持仓 ≤ `MAX_OPEN_POSITIONS`；默认不做空。
+- 只交易策略里列出的代码；单笔金额 ≤ `MAX_ORDER_NOTIONAL`（默认 $1000，再乘以“每笔占账户 %”取较小值）；每天开仓 ≤ `MAX_DAILY_ORDERS`；同时持仓 ≤ `MAX_OPEN_POSITIONS`（未成交的开仓单也算）；默认不做空。
 - 必须设置 `API_TOKEN`，否则自动交易保持关闭（防止别人通过网页改策略）。
 - 同一个信号只会下一次单（本地记录 + 券商端 `client_order_id` 双重去重）。
-- 开多时如果策略有止损，会一起挂一张券商端止损单（OTO），即使本程序停了也有保护。
-- 一键暂停：网页「账户」页“暂停”，或 Telegram 发 `/pause`（`/resume` 恢复，仅 `TELEGRAM_CHAT_IDS` 里的管理员可用）。
+- 开仓（多或空）时如果策略有止损，会一起挂一张券商端止损单（OTO），即使本程序停了也有保护；策略的止损信号交给这张止损单处理，其他平仓信号会先撤掉它再平仓。
+- 一键暂停：网页「账户」页“暂停”，或 Telegram 发 `/pause`（`/resume` 恢复，仅 `TELEGRAM_CHAT_IDS` 里的私聊可用；群聊里还需要发送者在 `TELEGRAM_ADMIN_IDS` 里）。暂停只阻止新开仓，平仓信号照常执行，避免策略已平仓而账户还持有。
 - 紧急清仓：网页“紧急清仓”（需输入 FLATTEN），撤销所有挂单、平掉全部持仓并暂停。
 - 每笔下单/拒绝/失败都记录在「账户」页，并推送给管理员。
 

@@ -17,7 +17,8 @@
   let chart = null, series = null;
   let bars = [], times = [], step = 86400, symbol = null;
   let drawings = [], tool = "cursor", magnet = false, hidden = false;
-  let draft = null, selected = null, drag = null, dirty = true, saveTimer = null;
+  let draft = null, selected = null, drag = null, dirty = true, loaded = false;
+  const saveTimers = new Map();   // per symbol, so switching symbols never cancels a pending save
   let capturing = false;  // we own the current gesture: keep it away from the chart (no panning)
 
   const canvas = document.getElementById("drawCanvas");
@@ -406,15 +407,23 @@
   // ------------------------------------------------------------ persistence
   function changed() {
     dirty = true; renderList();
-    clearTimeout(saveTimer);
+    // never overwrite the server copy with a list that failed to load
+    if (!loaded) { console.warn("图形列表未加载成功，本次修改不会保存"); return; }
     const sym = symbol, snapshot = JSON.parse(JSON.stringify(drawings));
-    saveTimer = setTimeout(async () => {
+    clearTimeout(saveTimers.get(sym));
+    saveTimers.set(sym, setTimeout(async () => {
+      saveTimers.delete(sym);
       try { await api("/api/drawings?symbol=" + encodeURIComponent(sym), { method: "PUT", body: JSON.stringify(snapshot) }); }
       catch (e) { console.warn("保存图形失败", e); }
-    }, 600);
+    }, 600));
   }
   async function load(sym) {
-    try { drawings = await api("/api/drawings?symbol=" + encodeURIComponent(sym)); } catch (e) { drawings = []; }
+    loaded = false; drawings = []; selected = null; renderProps(); renderList(); dirty = true;
+    let list;
+    try { list = await api("/api/drawings?symbol=" + encodeURIComponent(sym)); } catch (e) { list = null; }
+    if (sym !== symbol) return;            // a newer symbol was opened meanwhile
+    drawings = Array.isArray(list) ? list.filter(d => d && typeof d === "object" && Array.isArray(d.points)) : [];
+    loaded = Array.isArray(list);
     selected = null; renderProps(); renderList(); dirty = true;
   }
 

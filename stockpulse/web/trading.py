@@ -1,7 +1,9 @@
 """Chart / strategy / signal API (the TradingView-style part of the app)."""
 from __future__ import annotations
 
+import functools
 import json
+import logging
 import math
 import threading
 import re
@@ -31,18 +33,35 @@ from ..strategy.scanner import MAX_SYMBOLS, scan
 from ..strategy.signals import SignalEngine
 
 MAX_BARS = 5000
+SYMBOL_PARAM_RE = re.compile(r"^[A-Z0-9^][A-Z0-9.\-=^]{0,19}$")
+log = logging.getLogger(__name__)
+
+
+def bad_input_is_400(fn):
+    """Routes taking a free-form JSON body: wrong value types become 400 instead of 500."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except (TypeError, ValueError, AttributeError, KeyError) as exc:
+            if isinstance(exc, DSLError):
+                raise HTTPException(400, {"errors": [str(exc)]}) from exc
+            log.info("bad request body for %s: %r", fn.__name__, exc)
+            raise HTTPException(400, f"参数格式错误：{exc}") from exc
+    return wrapper
 
 
 def _line(s: pd.Series) -> list[dict]:
     return [{"time": int(t.timestamp()), "value": round(float(v), 4)}
-            for t, v in s.items() if v is not None and not (isinstance(v, float) and math.isnan(v))]
+            for t, v in s.items() if v is not None and math.isfinite(float(v))]
 
 
 def _num(parts: list[str], i: int, default: float) -> float:
     try:
-        return float(parts[i])
+        v = float(parts[i])
     except (IndexError, ValueError):
         return default
+    return v if math.isfinite(v) and abs(v) <= MAX_BARS * 10 else default
 
 
 def indicator_series(df: pd.DataFrame, spec: str) -> list[dict]:
@@ -146,6 +165,8 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
 
     def load(symbol: str, interval: str, limit: int, refresh: bool = True) -> pd.DataFrame:
         check_interval(interval)
+        if not SYMBOL_PARAM_RE.match(symbol):
+            raise HTTPException(400, f"代码格式不对：{symbol[:30]}")
         if refresh:
             store.maybe_update(symbol, interval)
         df = store.get(symbol, interval, min(max(limit, 50), MAX_BARS))
@@ -170,7 +191,10 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
                     script_errors.append(str(exc))
                     continue
             else:
-                out = indicator_series(df, spec)
+                try:
+                    out = indicator_series(df, spec)
+                except (ValueError, ZeroDivisionError, OverflowError) as exc:
+                    raise HTTPException(400, f"指标参数无效：{spec}（{exc}）") from exc
             for s in out:
                 if uid:
                     s = {**s, "id": f"{uid}|{s['id']}", "uid": uid,
@@ -185,11 +209,13 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
             "symbol": symbol, "interval": interval, "provider": store.provider, "bars": bars, "series": series,
             "last": {"price": round(float(last), 4), "change_pct": round((last / prev - 1) * 100, 2),
                      "time": bars[-1]["time"], "forming": len(closed) < len(df)},
-            "signals": [s for s in db.list_signals(200, symbol) if s["interval"] == interval],
+            "signals": db.list_signals(200, symbol, interval),
             "script_errors": script_errors,
         }
 
     # ---------------------------------------------------------------- custom indicator scripts
+    scripts_lock = threading.Lock()
+
     def get_scripts() -> list[dict]:
         raw = db.get_kv("scripts")
         return json.loads(raw) if raw else []
@@ -204,9 +230,11 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
         for kv in (rest[0] if rest else "").split(";"):
             k, _, v = kv.partition("=")
             try:
-                inputs[k.strip()] = float(v)
+                f = float(v)
             except ValueError:
-                pass
+                continue
+            if math.isfinite(f):
+                inputs[k.strip()] = f
         refs = {}
         for sym in script_refs(sc["source"]):
             store.maybe_update(sym, interval, min_gap_s=300)
@@ -234,6 +262,7 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
         return {"scripts": get_scripts(), "examples": SCRIPT_EXAMPLES}
 
     @r.post("/scripts/validate")
+    @bad_input_is_400
     def check_script(body: dict[str, Any] = Body(...)):
         try:
             return {"ok": True, "inputs": validate_script(str(body.get("source", "")))}
@@ -241,8 +270,9 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
             return {"ok": False, "errors": [str(exc)]}
 
     @r.post("/scripts")
+    @bad_input_is_400
     def save_script(body: dict[str, Any] = Body(...), _=require_token):
-        name = str(body.get("name", "")).strip()[:60] or "自定义指标"
+        name = str(body.get("name") or "").strip()[:60] or "自定义指标"
         source = str(body.get("source", ""))
         if len(source) > 20_000:
             raise HTTPException(400, "脚本太长")
@@ -250,27 +280,27 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
             inputs = validate_script(source)
         except DSLError as exc:
             raise HTTPException(400, {"errors": [str(exc)]}) from exc
-        scripts = get_scripts()
         sid = str(body.get("id") or "")
         item = {"id": sid if re.fullmatch(r"[a-z0-9]{6,16}", sid) else uuid.uuid4().hex[:10], "name": name,
                 "overlay": bool(body.get("overlay")), "source": source, "inputs": inputs}
-        scripts = [x for x in scripts if x["id"] != item["id"]] + [item]
-        if len(scripts) > 100:
-            raise HTTPException(400, "最多保存 100 个脚本")
-        db.set_kv("scripts", json.dumps(scripts, ensure_ascii=False))
+        with scripts_lock:   # read-modify-write of one kv blob
+            scripts = [x for x in get_scripts() if x["id"] != item["id"]] + [item]
+            if len(scripts) > 100:
+                raise HTTPException(400, "最多保存 100 个脚本")
+            db.set_kv("scripts", json.dumps(scripts, ensure_ascii=False))
         return item
 
     @r.delete("/scripts/{sid}")
     def delete_script(sid: str, _=require_token):
-        scripts = get_scripts()
-        db.set_kv("scripts", json.dumps([x for x in scripts if x["id"] != sid], ensure_ascii=False))
+        with scripts_lock:
+            db.set_kv("scripts", json.dumps([x for x in get_scripts() if x["id"] != sid], ensure_ascii=False))
         return {"deleted": sid}
 
     # ---------------------------------------------------------------- options + calendar
     @r.get("/options")
     def options(symbol: str, expiry: str | None = None):
         sym = symbol.upper().strip()
-        if not sym or len(sym) > 20:
+        if not SYMBOL_PARAM_RE.match(sym):
             raise HTTPException(400, "代码无效")
         try:
             return get_chain(db, settings, sym, expiry or None)
@@ -285,6 +315,8 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
             d0 = date.fromisoformat(start) if start else date.today() - timedelta(days=date.today().weekday())
         except ValueError as exc:
             raise HTTPException(400, "start 格式应为 YYYY-MM-DD") from exc
+        if abs((d0 - date.today()).days) > 400:
+            raise HTTPException(400, "只能查询前后一年内的日历")
         symbols = list(db.get_watchlist(settings.watchlist))
         try:
             return get_calendar(db, settings, d0, days, symbols)
@@ -301,7 +333,10 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
     def put_drawings(symbol: str, drawings: list[dict[str, Any]] = Body(...), _=require_token):
         if len(drawings) > 500:
             raise HTTPException(400, "最多保存 500 个图形")
-        blob = json.dumps(drawings, ensure_ascii=False)
+        try:
+            blob = json.dumps(drawings, ensure_ascii=False, allow_nan=False)
+        except ValueError as exc:
+            raise HTTPException(400, "图形数据里有无效数字") from exc
         if len(blob) > 500_000:
             raise HTTPException(400, "图形数据太大")
         db.set_kv(f"drawings:{symbol.upper().strip()}", blob)
@@ -311,7 +346,7 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
     @r.get("/fundamentals")
     def fundamentals(symbol: str, refresh: bool = False):
         sym = symbol.upper().strip()
-        if not sym or len(sym) > 20:
+        if not SYMBOL_PARAM_RE.match(sym):
             raise HTTPException(400, "代码无效")
         try:
             data = get_fundamentals(db, settings, sym, refresh=refresh)
@@ -324,6 +359,7 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
 
     # ---------------------------------------------------------------- screener
     @r.post("/screener")
+    @bad_input_is_400
     def screener(body: dict[str, Any] = Body(default={})):
         symbols = [s.strip().upper() for s in body.get("symbols") or [] if s and s.strip()]
         if not symbols:
@@ -392,7 +428,7 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
     def parse_cfg(body: dict[str, Any]) -> StrategyConfig:
         try:
             cfg = StrategyConfig.from_dict(body)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, AttributeError) as exc:
             raise HTTPException(400, f"策略格式错误：{exc}") from exc
         errors = cfg.validate()
         if errors:
@@ -400,6 +436,7 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
         return cfg
 
     @r.post("/strategies/validate")
+    @bad_input_is_400
     def validate_strategy(body: dict[str, Any] = Body(...)):
         try:
             cfg = StrategyConfig.from_dict(body)
@@ -409,6 +446,7 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
         return {"ok": not errors, "errors": errors}
 
     @r.post("/strategies")
+    @bad_input_is_400
     def save_strategy(body: dict[str, Any] = Body(...), _=require_token):
         cfg = parse_cfg(body)
         if cfg.enabled and not cfg.symbols:
@@ -423,6 +461,7 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
         return {"deleted": sid}
 
     @r.post("/backtest")
+    @bad_input_is_400
     def backtest(body: dict[str, Any] = Body(...)):
         """Body: {strategy: {...config} | strategy_id, symbol, interval?, limit?}"""
         if body.get("strategy_id"):
@@ -447,6 +486,7 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
                 "slippage": settings.slippage_bps}, **res.to_dict()}
 
     @r.post("/scan")
+    @bad_input_is_400
     def scan_symbols(body: dict[str, Any] = Body(...)):
         """Body: {strategy: {...} | strategy_id, symbols?: [...], universe?: "watchlist"|"hot"|"both", interval?}"""
         if body.get("strategy_id"):
@@ -472,6 +512,7 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
         return scan(store, cfg, symbols[:MAX_SYMBOLS], settings.commission_bps, settings.slippage_bps)
 
     @r.post("/optimize")
+    @bad_input_is_400
     def optimize_params(body: dict[str, Any] = Body(...)):
         """Body: {strategy: {...}, symbol, interval?, grid: {"fast": "5:30:5"}, mode: split|walk_forward,
         objective, train_pct, folds, min_trades}"""
@@ -499,6 +540,7 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
         return engine.paper.summary()
 
     @r.post("/paper/reset")
+    @bad_input_is_400
     def paper_reset(body: dict[str, Any] = Body(default={}), _=require_token):
         engine.paper.reset(body.get("capital"))
         return engine.paper.summary()
@@ -519,6 +561,8 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
 
     @r.post("/broker/flatten")
     def broker_flatten(body: dict[str, Any] = Body(...), _=require_token):
+        if not settings.report_api_token:
+            raise HTTPException(400, "紧急清仓会动用真实账户，必须先设置 API_TOKEN")
         if body.get("confirm") != "FLATTEN":
             raise HTTPException(400, '需要 {"confirm": "FLATTEN"} 才会清仓')
         return engine.broker.flatten_all()
@@ -535,6 +579,7 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
         return db.list_alerts(symbol=symbol.upper() if symbol else None)
 
     @r.post("/alerts")
+    @bad_input_is_400
     def save_alert(body: dict[str, Any] = Body(...), _=require_token):
         try:
             a = Alert.from_dict(body)

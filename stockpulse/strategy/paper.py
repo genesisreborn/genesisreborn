@@ -64,6 +64,8 @@ class PaperAccount:
     # ------------------------------------------------------------ account
     def reset(self, capital: float | None = None) -> None:
         capital = float(capital or self.settings.paper_capital)
+        if not math.isfinite(capital) or capital <= 0:
+            raise ValueError("初始资金必须是正数")
         with self.db.tx() as c:
             for t in ("paper_orders", "paper_positions", "paper_trades", "paper_equity"):
                 c.execute(f"DELETE FROM {t}")

@@ -288,8 +288,11 @@ class Database:
                  sig["reason"], sig["price"], iso(utcnow())))
             return int(cur.lastrowid) if cur.rowcount else None
 
-    def list_signals(self, limit: int = 100, symbol: str | None = None) -> list[dict]:
-        if symbol:
+    def list_signals(self, limit: int = 100, symbol: str | None = None, interval: str | None = None) -> list[dict]:
+        if symbol and interval:
+            rows = self.query("SELECT * FROM signals WHERE symbol=? AND interval=? ORDER BY bar_ts DESC, id DESC LIMIT ?",
+                              (symbol, interval, limit))
+        elif symbol:
             rows = self.query("SELECT * FROM signals WHERE symbol=? ORDER BY bar_ts DESC, id DESC LIMIT ?", (symbol, limit))
         else:
             rows = self.query("SELECT * FROM signals ORDER BY created DESC, id DESC LIMIT ?", (limit,))

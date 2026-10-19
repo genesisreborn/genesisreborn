@@ -222,7 +222,16 @@ class TelegramNotifier:
         return fired
 
     # ---- commands (long polling) ----
-    def handle_command(self, chat_id: str, text: str) -> str:
+    def can_control(self, chat_id: str, user_id: str | None, chat_type: str) -> bool:
+        """Trading controls: a configured chat, and in groups only the listed admin users."""
+        if not self.is_owner(chat_id):
+            return False
+        if chat_type == "private":
+            return True
+        admins = {str(a) for a in self.settings.telegram_admin_ids}
+        return bool(user_id) and str(user_id) in admins
+
+    def handle_command(self, chat_id: str, text: str, user_id: str | None = None, chat_type: str = "private") -> str:
         cmd, _, arg = text.strip().partition(" ")
         cmd = cmd.split("@")[0].lower()
         snap = self.db.latest_snapshot()
@@ -245,8 +254,8 @@ class TelegramNotifier:
             return "<b>最近的策略信号</b>\n" + "\n".join(
                 f"• {_e(describe_signal(s))} · {_e(s['strategy'])} · {_e(s['interval'])}" for s in sigs)
         if cmd in ("/pause", "/resume"):
-            if not self.is_owner(chat_id):
-                return "只有 TELEGRAM_CHAT_IDS 里配置的管理员可以控制自动交易。"
+            if not self.can_control(chat_id, user_id, chat_type):
+                return "只有 TELEGRAM_CHAT_IDS 里配置的私聊（群里需在 TELEGRAM_ADMIN_IDS 里的用户）可以控制自动交易。"
             self.db.set_kv("broker_paused", "1" if cmd == "/pause" else "0")
             return "⏸ 自动交易已暂停，不会再向券商下新单。发送 /resume 恢复。" if cmd == "/pause" else "▶️ 自动交易已恢复。"
         if cmd == "/account":
@@ -295,7 +304,8 @@ class TelegramNotifier:
                     text = msg.get("text", "")
                     if text.startswith("/"):
                         chat_id = str(msg["chat"]["id"])
-                        self.send(chat_id, self.handle_command(chat_id, text))
+                        user_id = str((msg.get("from") or {}).get("id") or "") or None
+                        self.send(chat_id, self.handle_command(chat_id, text, user_id, msg["chat"].get("type", "private")))
                 self.db.set_kv("tg_offset", str(offset))
             except Exception as exc:  # noqa: BLE001
                 log.warning("telegram polling error: %s", exc)
@@ -315,10 +325,16 @@ def _chunks(text: str) -> list[str]:
         return [text]
     out, cur = [], ""
     for line in text.split("\n"):
-        if len(cur) + len(line) + 1 > MAX_LEN:
+        while len(line) > MAX_LEN:          # a single over-long line: hard split
+            if cur:
+                out.append(cur)
+                cur = ""
+            out.append(line[:MAX_LEN])
+            line = line[MAX_LEN:]
+        if cur and len(cur) + len(line) + 1 > MAX_LEN:
             out.append(cur)
             cur = ""
         cur += line + "\n"
-    if cur:
+    if cur.strip():
         out.append(cur)
     return out

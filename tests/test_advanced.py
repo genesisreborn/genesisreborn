@@ -47,8 +47,13 @@ def test_window_metrics_slice():
     idx = pd.date_range("2026-01-01", periods=5, freq="D", tz="UTC")
     eq = pd.Series([100, 110, 99, 120, 132], index=idx, dtype=float)
     m = window_metrics(eq, [], idx[2], idx[4], "1d")
-    assert m["total_return_pct"] == pytest.approx((132 / 99 - 1) * 100, abs=0.01)
-    assert m["max_drawdown_pct"] == 0
+    # base is the close before the window, so the move into its first bar counts
+    assert m["total_return_pct"] == pytest.approx((132 / 110 - 1) * 100, abs=0.01)
+    assert m["max_drawdown_pct"] == pytest.approx((99 / 110 - 1) * 100, abs=0.01)
+    # adjacent windows chain to the full-period return
+    a = window_metrics(eq, [], idx[0], idx[2], "1d")["total_return_pct"]
+    b = window_metrics(eq, [], idx[3], idx[4], "1d")["total_return_pct"]
+    assert (1 + a / 100) * (1 + b / 100) == pytest.approx(1.32, abs=1e-3)
 
 
 def test_optimize_split_and_walk_forward():

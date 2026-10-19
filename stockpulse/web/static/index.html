@@ -136,6 +136,7 @@ svg.spark { vertical-align: middle; }
 <aside id="drawer"></aside>
 <script>
 const $ = (id) => document.getElementById(id);
+const safeUrl = (u) => /^https?:\/\//i.test(u || "") ? u : "#";
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pct = (v) => v == null ? "—" : `<span class="${v >= 0 ? "up" : "down"} num">${v >= 0 ? "+" : ""}${v.toFixed(2)}%</span>`;
 const money = (v) => v == null ? "—" : `<span class="num">$${v.toFixed(2)}</span>`;
@@ -216,7 +217,7 @@ function render(s) {
 function renderNews(list) {
   $("news").innerHTML = list.length ? list.map(a => `<div class="news-item">
       ${(a.tickers || "").split(",").filter(Boolean).slice(0, 4).map(t => `<span class="tick">$${esc(t)}</span>`).join("")}
-      <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>
+      <a href="${esc(safeUrl(a.url))}" target="_blank" rel="noopener">${esc(a.title)}</a>
       <div class="news-meta">${esc(a.source)} · ${ago(a.published)} · 情绪 ${sent(a.sentiment)}</div></div>`).join("")
     : `<div class="empty">暂无资讯</div>`;
 }
@@ -259,7 +260,7 @@ async function openStock(t) {
     <h2 style="font-size:14px">评分构成</h2>${comps || '<div class="news-meta">—</div>'}
     <h2 style="font-size:14px;margin-top:14px">热度走势</h2>${historyChart(data.history)}
     <h2 style="font-size:14px;margin-top:14px">相关资讯（3 天）</h2>
-    ${data.articles.map(a => `<div class="news-item"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>
+    ${data.articles.map(a => `<div class="news-item"><a href="${esc(safeUrl(a.url))}" target="_blank" rel="noopener">${esc(a.title)}</a>
       <div class="news-meta">${esc(a.source)} · ${ago(a.published)} · 情绪 ${sent(a.sentiment)}</div></div>`).join("") || '<div class="empty">无</div>'}`;
 }
 
@@ -283,7 +284,14 @@ $("reportBtn").onclick = async () => {
 };
 $("refreshBtn").onclick = async () => {
   $("refreshBtn").disabled = true; $("refreshBtn").textContent = "刷新中…";
-  await fetch("/api/refresh", { method: "POST" });
+  let token = getToken();
+  let res = await fetch("/api/refresh", { method: "POST", headers: token ? { Authorization: "Bearer " + token } : {} });
+  if (res.status === 401) {
+    token = prompt("请输入 API_TOKEN：") || "";
+    setToken(token);
+    res = await fetch("/api/refresh", { method: "POST", headers: { Authorization: "Bearer " + token } });
+  }
+  if (!res.ok) { $("refreshBtn").disabled = false; $("refreshBtn").textContent = "立即刷新"; return; }
   const poll = setInterval(async () => {
     const s = await fetch("/api/snapshot").then(r => r.json());
     if (!s.refreshing) { clearInterval(poll); load(); }
@@ -293,9 +301,13 @@ $("themeBtn").onclick = () => {
   const root = document.documentElement;
   const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
   root.dataset.theme = dark ? "light" : "dark";
-  try { localStorage.setItem("theme", root.dataset.theme); } catch (e) {}
+  try { localStorage.setItem("theme", JSON.stringify(root.dataset.theme)); } catch (e) {}   // same format as chart.html
 };
-try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+try {
+  let t = localStorage.getItem("theme");
+  try { t = JSON.parse(t); } catch (e) { /* older raw value */ }
+  if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
+} catch (e) {}
 document.addEventListener("keydown", e => { if (e.key === "Escape") $("drawer").classList.remove("open"); });
 load().then(() => loadReports());
 setInterval(load, 60000);

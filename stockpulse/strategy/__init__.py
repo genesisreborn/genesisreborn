@@ -1,6 +1,7 @@
 """Strategy definitions: rule expressions + risk settings, validated and serialisable."""
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import asdict, dataclass, field
 
@@ -46,13 +47,25 @@ class StrategyConfig:
 
     def normalize(self) -> None:
         self.name = (self.name or "").strip()[:80]
-        self.symbols = sorted({s.strip().upper() for s in self.symbols if s and s.strip()})
+        if not isinstance(self.symbols, (list, tuple)):
+            raise ValueError("symbols 必须是列表")
+        self.symbols = sorted({str(s).strip().upper() for s in self.symbols if s and str(s).strip()})
+        for attr in ("name", "long_entry", "long_exit", "short_entry", "short_exit", "interval", "execution", "description"):
+            if not isinstance(getattr(self, attr) or "", str):
+                raise ValueError(f"{attr} 必须是字符串")
+            setattr(self, attr, getattr(self, attr) or "")
         self.params = {str(k): float(v) for k, v in (self.params or {}).items()}
         for attr in ("stop_loss_pct", "take_profit_pct", "atr_stop_mult", "position_pct", "alloc_pct", "risk_pct"):
             setattr(self, attr, float(getattr(self, attr) or 0))
 
     def validate(self) -> list[str]:
         errors = []
+        nums = [self.stop_loss_pct, self.take_profit_pct, self.atr_stop_mult, self.position_pct, self.alloc_pct,
+                self.risk_pct, *self.params.values()]
+        if not all(math.isfinite(v) for v in nums):
+            return ["数值不能是 NaN 或无穷大"]
+        if min(self.stop_loss_pct, self.take_profit_pct, self.atr_stop_mult) < 0:
+            errors.append("止损 / 止盈 / ATR 倍数不能是负数")
         if not self.name:
             errors.append("策略名称不能为空")
         if self.interval not in INTERVALS:

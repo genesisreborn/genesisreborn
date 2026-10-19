@@ -60,8 +60,11 @@ def parse_grid(spec: dict) -> dict[str, list[float]]:
 
 
 def window_metrics(equity: pd.Series, trades: list, start: pd.Timestamp, end: pd.Timestamp, interval: str) -> dict:
-    """Metrics of the equity curve restricted to [start, end]."""
-    eq = equity[(equity.index >= start) & (equity.index <= end)]
+    """Metrics of the equity curve over [start, end]; the base is the close before ``start`` so
+    adjacent windows chain without losing the boundary bar."""
+    lo = max(int(equity.index.searchsorted(start)) - 1, 0)
+    hi = int(equity.index.searchsorted(end, side="right"))
+    eq = equity.iloc[lo:hi]
     if len(eq) < 2:
         return {"total_return_pct": 0.0, "sharpe": 0.0, "max_drawdown_pct": 0.0, "trades": 0, "profit_factor": None,
                 "calmar": 0.0}
@@ -73,7 +76,7 @@ def window_metrics(equity: pd.Series, trades: list, start: pd.Timestamp, end: pd
     closed = [t for t in trades if t.exit_reason != "open" and start <= t.exit_time <= end]
     wins = sum(t.pnl_pct for t in closed if t.pnl_pct > 0)
     losses = -sum(t.pnl_pct for t in closed if t.pnl_pct <= 0)
-    years = max(len(eq) / bpy, 1e-9)
+    years = max((len(eq) - 1) / bpy, 1e-9)
     ann = ((eq.iloc[-1] / eq.iloc[0]) ** (1 / years) - 1) * 100 if eq.iloc[-1] > 0 else -100.0
     return {
         "total_return_pct": round(float(total), 2), "sharpe": round(sharpe, 2), "max_drawdown_pct": round(dd, 2),
@@ -146,6 +149,7 @@ def optimize(df: pd.DataFrame, cfg: StrategyConfig, grid_spec: dict, mode: str =
             "top_test_mean_return_pct": round(float(np.mean([r["test"]["total_return_pct"] for r in top])), 2),
             "rows": [{**r, "score": round(r["score"], 4) if r["score"] > -1e8 else None} for r in rows[:50]],
         }
+        heat_end = cut - 1
     elif mode == "walk_forward":
         folds = int(min(max(folds, 2), 8))
         n = len(df)
@@ -177,8 +181,7 @@ def optimize(df: pd.DataFrame, cfg: StrategyConfig, grid_spec: dict, mode: str =
                               "params": params, "train": ins, "test": oos})
         compounded = (np.prod([1 + r / 100 for r in oos_returns]) - 1) * 100
         most = max(set(chosen), key=chosen.count)
-        test_start = idx[first_train]
-        bh = (df["close"].iloc[-1] / df["close"].loc[test_start] - 1) * 100
+        bh = (df["close"].iloc[-1] / df["close"].iloc[first_train - 1] - 1) * 100   # from the close before the first test bar
         result = {
             "mode": "walk_forward", "objective": objective, "combos": len(combos), "folds": fold_rows,
             "oos_total_return_pct": round(float(compounded), 2),
@@ -193,7 +196,7 @@ def optimize(df: pd.DataFrame, cfg: StrategyConfig, grid_spec: dict, mode: str =
     # 2-parameter heatmap of the in-sample objective (split) / full-period objective (walk-forward)
     if len(grid) == 2:
         a, b = list(grid)
-        rng = (idx[0], idx[int(len(df) * train_pct / 100) - 1]) if mode == "split" else (idx[0], idx[-1])
+        rng = (idx[0], idx[heat_end]) if mode == "split" else (idx[0], idx[-1])
         cells = []
         for params, res in runs:
             m = window_metrics(res.equity, res.trades, *rng, iv)

@@ -25,6 +25,8 @@ def _bool(name: str, default: bool) -> bool:
 class Settings:
     telegram_bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     telegram_chat_ids: list[str] = field(default_factory=lambda: _list("TELEGRAM_CHAT_IDS"))
+    # user ids allowed to /pause /resume from a group chat (private chats in TELEGRAM_CHAT_IDS always can)
+    telegram_admin_ids: list[str] = field(default_factory=lambda: _list("TELEGRAM_ADMIN_IDS"))
 
     anthropic_api_key: str = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
     claude_model: str = field(default_factory=lambda: os.getenv("CLAUDE_MODEL", "claude-opus-5-5"))

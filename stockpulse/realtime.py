@@ -54,6 +54,7 @@ class RealtimeMonitor:
         self.on_fire = on_fire
         self.price_fn = price_fn or self._default_price
         self.last: dict[str, float] = {}
+        self._ws_connected = False
         self.status = {"mode": self.mode, "running": False, "symbols": [], "last_tick": None, "error": None}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -160,18 +161,23 @@ class RealtimeMonitor:
                     ev = msg.get("ev")
                     if ev == "status" and msg.get("status") in ("auth_failed", "error"):
                         raise RuntimeError(msg.get("message", "auth failed"))
+                    if ev == "status" and msg.get("status") == "auth_success":
+                        self._ws_connected = True
                     if ev in ("A", "AM") and "sym" in msg and "c" in msg:
                         self.on_price(msg["sym"], float(msg["c"]))
 
     def _ws_loop(self) -> None:
         backoff = 2
         while not self._stop.is_set():
+            self._ws_connected = False
             try:
                 asyncio.run(self._ws_session())
                 backoff = 2
             except Exception as exc:  # noqa: BLE001 - reconnect on any failure
                 self.status["error"] = f"websocket: {exc}"
                 log.warning("realtime websocket error: %s (retry in %ss)", exc, backoff)
+                if self._ws_connected:   # the session had worked: start backing off from scratch
+                    backoff = 2
                 self._stop.wait(backoff)
                 backoff = min(backoff * 2, 120)
 

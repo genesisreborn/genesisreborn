@@ -72,14 +72,18 @@ class Engine:
         new = self.signals.run()
         tg = self.settings.telegram_enabled
         for sig in new:
-            if tg and sig.get("notify", True):
-                self.notifier.send_signal(sig)
-            if sig.get("execution") == "paper":
-                self.paper.submit(sig)
-            elif sig.get("execution") == "broker":
-                rec = self.broker.execute(sig, sig.get("symbols") or [], sig.get("alloc_pct", 10))
-                if tg and rec["status"] in ("submitted", "rejected", "error"):
-                    self.notifier.send_execution(rec)
+            # signals are already stored (and deduped) at this point; one failure must not drop the rest
+            try:
+                if tg and sig.get("notify", True):
+                    self.notifier.send_signal(sig)
+                if sig.get("execution") == "paper":
+                    self.paper.submit(sig)
+                elif sig.get("execution") == "broker":
+                    rec = self.broker.execute(sig, sig.get("symbols") or [], sig.get("alloc_pct", 10))
+                    if tg and not (rec["status"] == "skipped" and "重复提交" in rec["detail"]):
+                        self.notifier.send_execution(rec)
+            except Exception:  # noqa: BLE001
+                log.exception("handling signal %s failed", sig.get("id"))
         # fill pending paper orders / check paper stops on every run
         for ev in self.paper.process():
             if tg:
@@ -113,7 +117,7 @@ class Engine:
         try:
             self.refresh()
         except Exception:  # noqa: BLE001 - keep the scheduler alive
-            pass
+            log.exception("scheduled refresh failed")
 
     def start(self) -> None:
         s = self.settings

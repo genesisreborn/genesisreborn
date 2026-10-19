@@ -8,7 +8,8 @@ import pandas as pd
 
 from .. import indicators as ind
 from ..market_data import BarStore, closed_bars
-from .dsl import Evaluator, validate
+from .dsl import Evaluator, referenced_symbols, validate
+from .refs import load_symbols
 
 COLUMNS = {
     "price": "价格", "change_pct": "涨跌%", "volume": "成交量", "rel_volume": "量比", "perf_1w": "1周%",
@@ -53,6 +54,7 @@ def run_screener(store: BarStore, symbols: list[str], expr: str = "", fetch: boo
     if fetch:
         with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(lambda s: store.maybe_update(s, "1d", min_gap_s=300), symbols))
+    refs = load_symbols(store, referenced_symbols(expr), "1d", 450, fetch) if expr else {}
     rows, missing = [], []
     for sym in symbols:
         df = closed_bars(store.get(sym, "1d", 400, refresh_if_empty=False), "1d")
@@ -61,7 +63,7 @@ def run_screener(store: BarStore, symbols: list[str], expr: str = "", fetch: boo
             continue
         row = screen_row(sym, df)
         if expr:
-            row["match"] = bool(Evaluator(df).eval(expr).iloc[-1])
+            row["match"] = bool(Evaluator(df, refs=refs).eval(expr).iloc[-1])
         rows.append(row)
     matched = [r for r in rows if r.get("match", True)]
     return {"columns": COLUMNS, "rows": matched, "total": len(rows), "missing": missing, "filter": expr}
