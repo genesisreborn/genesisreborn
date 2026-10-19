@@ -4,12 +4,15 @@ from __future__ import annotations
 import json
 import math
 import threading
+from datetime import timedelta
 from typing import Any, Callable
 
 import pandas as pd
 from fastapi import APIRouter, Body, HTTPException
 
 from .. import indicators as ind
+from ..db import utcnow
+from ..fundamentals import get_fundamentals
 from ..market_data import INTERVALS, closed_bars
 from ..strategy import StrategyConfig
 from ..strategy.backtest import run_backtest
@@ -186,6 +189,21 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
             raise HTTPException(400, "图形数据太大")
         db.set_kv(f"drawings:{symbol.upper().strip()}", blob)
         return {"saved": len(drawings)}
+
+    # ---------------------------------------------------------------- fundamentals + symbol news
+    @r.get("/fundamentals")
+    def fundamentals(symbol: str, refresh: bool = False):
+        sym = symbol.upper().strip()
+        if not sym or len(sym) > 20:
+            raise HTTPException(400, "代码无效")
+        try:
+            data = get_fundamentals(db, settings, sym, refresh=refresh)
+        except LookupError as exc:
+            raise HTTPException(404, f"{sym} 没有基本面数据（指数、外汇、加密货币通常没有）") from exc
+        except Exception as exc:  # noqa: BLE001 - Yahoo fails in many ways
+            raise HTTPException(502, f"基本面数据获取失败：{exc}") from exc
+        news = db.articles_for(sym, utcnow() - timedelta(days=14), limit=20)
+        return {**data, "news": news}
 
     # ---------------------------------------------------------------- screener
     @r.post("/screener")

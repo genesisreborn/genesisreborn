@@ -42,6 +42,10 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
     def chart_page():
         return FileResponse(STATIC / "chart.html")
 
+    @app.get("/multi")
+    def multi_page():
+        return FileResponse(STATIC / "multi.html")
+
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     def token_dep(authorization: str | None = Header(None), token: str | None = Query(None)) -> None:

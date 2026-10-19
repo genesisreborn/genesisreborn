@@ -125,6 +125,21 @@ th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line
 th { color: var(--muted); font-weight: 500; font-size: 11px; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.click { cursor: pointer; } tr.click:hover { background: var(--panel-2); }
+.btn-link { color: var(--text); text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font-size: 13px; }
+.btn-link:hover { background: var(--panel-2); }
+#evtBtn.on { color: var(--accent); border-color: var(--accent); }
+.fund-head { padding: 10px 12px 0; }
+.fund-head h3 { margin: 0 0 4px; font-size: 16px; }
+.fund-head p { margin: 6px 0 0; font-size: 12px; color: var(--muted); line-height: 1.6; max-height: 5em; overflow: auto; }
+.fund-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; padding: 4px 12px 8px; }
+@media (max-width: 900px) { .fund-grid { grid-template-columns: 1fr; } }
+.fund-bars { display: flex; align-items: flex-end; gap: 6px; height: 120px; margin-top: 10px; border-bottom: 1px solid var(--line); }
+.fund-bars .col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; font-size: 10px; color: var(--muted); }
+.fund-bars .pair { display: flex; gap: 2px; align-items: flex-end; width: 100%; justify-content: center; flex: 1; }
+.fund-bars .bar { width: 40%; border-radius: 2px 2px 0 0; min-height: 1px; }
+.fund-news a { display: block; color: var(--text); text-decoration: none; font-size: 12px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.fund-news a:hover { color: var(--accent); }
+.fund-news span { color: var(--muted); font-size: 11px; margin-left: 6px; }
 tr.active td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
 .row > * { flex: 1; }
@@ -181,6 +196,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
     <button id="replayBtn" title="K 线回放">⏪ 回放</button>
     <button id="tableBtn" title="K 线和指标数据表">数据表</button>
     <button id="screenBtn" title="股票筛选器">筛选器</button>
+    <button id="fundBtn" title="公司资料、估值、财报">基本面</button>
+    <button id="evtBtn" title="在 K 线上标出财报 (E)、分红 (D)、拆股 (S)">事件</button>
+    <a class="btn-link" href="/multi" title="多图布局">多图</a>
     <div class="quote"><span class="px" id="qPx">—</span><span id="qChg"></span></div>
     <span class="spacer"></span>
     <span class="badge" id="provider">—</span>
@@ -258,6 +276,27 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
           </div>
           <div class="muted" style="font-size:11px;padding:0 12px" id="scrInfo"></div>
           <div style="overflow:auto;padding:4px 12px 12px"><table id="scrTable"></table></div>
+        </div>
+        <div id="fundView" hidden>
+          <div class="fund-head" id="fundHead"></div>
+          <div class="metrics" id="fundStats"></div>
+          <div class="fund-grid">
+            <div>
+              <div class="row" style="justify-content:flex-start;gap:8px;padding:0 0 6px">
+                <b style="flex:0 0 auto">利润表</b>
+                <div class="seg" role="group" aria-label="周期" style="flex:0 0 auto"><button id="fqBtn" class="on">季度</button><button id="faBtn">年度</button></div>
+              </div>
+              <div style="overflow:auto"><table id="fundStmt"></table></div>
+              <div class="fund-bars" id="fundBars"></div>
+            </div>
+            <div>
+              <b>财报记录</b>
+              <div style="overflow:auto"><table id="fundEarn"></table></div>
+              <b style="display:block;margin-top:10px">相关资讯</b>
+              <div id="fundNews" class="fund-news"></div>
+            </div>
+          </div>
+          <p class="muted" style="font-size:11px;padding:0 12px 12px" id="fundFoot"></p>
         </div>
         <div id="scanView" hidden>
           <div class="metrics" id="scanMetrics"></div>
@@ -438,6 +477,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const fmt = (v, d = 2) => v == null || Number.isNaN(v) ? "—" : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+const safeUrl = (u) => /^https?:\/\//i.test(u || "") ? u : "#";
 const pctHtml = (v) => v == null ? "—" : `<span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : ""}${fmt(v)}%</span>`;
 const store = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } },
                 set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
@@ -701,7 +741,8 @@ function applyMarkers() {
     marks = (lastData.signals || []).map(s => markerFor(s.action, nextBarTime(s.bar_ts), "信号"));
   }
   const times = new Set(lastData.bars.map(b => b.time));
-  markersApi.setMarkers(marks.filter(m => times.has(m.time)).sort((a, b) => a.time - b.time));
+  marks = marks.filter(m => times.has(m.time)).concat(eventMarkers());
+  markersApi.setMarkers(marks.sort((a, b) => a.time - b.time));
 }
 function nextBarTime(t) {
   const bars = lastData.bars; const i = bars.findIndex(b => b.time === t);
@@ -910,6 +951,101 @@ $("screenBtn").onclick = () => {
 $("scrRun").onclick = runScreener;
 $("scrFilter").addEventListener("keydown", e => { if (e.key === "Enter") runScreener(); });
 
+// ---------------------------------------------------------------- fundamentals + corporate events
+let fundData = null, fundPeriod = "quarterly", showEvents = store.get("sp.events", true);
+const EVT = { earnings: ["E", "--s3"], dividend: ["D", "--up"], split: ["S", "--s4"] };
+function eventMarkers() {
+  if (!showEvents || !fundData || fundData.symbol !== state.symbol || !lastData) return [];
+  const bars = lastData.bars; if (!bars.length) return [];
+  const out = [];
+  for (const e of fundData.events || []) {
+    const t = e.time + 43200;                  // snap to the bar of that session (last bar starting before noon UTC)
+    if (t < bars[0].time || e.time > bars[bars.length - 1].time + 86400) continue;
+    let lo = 0, hi = bars.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (bars[mid].time <= t) lo = mid; else hi = mid - 1; }
+    const [txt, color] = EVT[e.type] || ["•", "--muted"];
+    out.push({ time: bars[lo].time, position: "belowBar", shape: "circle", color: css(color), text: txt, size: 1 });
+  }
+  return out;
+}
+async function loadFundamentals(force = false) {
+  const sym = state.symbol;
+  if (!force && fundData && fundData.symbol === sym) return fundData;
+  try {
+    const d = await api("/api/fundamentals?" + new URLSearchParams({ symbol: sym }));
+    if (sym === state.symbol) { fundData = d; applyMarkers(); }
+    return d;
+  } catch (e) {
+    if (sym === state.symbol) fundData = { symbol: sym, error: e.message, events: [] };
+    return fundData;
+  }
+}
+const fmtMoney = (v) => v == null ? "—" : Math.abs(v) >= 1e12 ? (v / 1e12).toFixed(2) + "T" : Math.abs(v) >= 1e9 ? (v / 1e9).toFixed(2) + "B"
+  : Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(1) + "M" : fmt(v, 0);
+function fmtStat(s) {
+  const v = s.value;
+  if (s.format === "money") return fmtMoney(v);
+  if (s.format === "pct") return (v * 100).toFixed(2) + "%";
+  if (s.format === "ratio") return fmt(v, 2);
+  if (s.format === "num") return Math.abs(v) >= 1e5 ? fmtVol(v) : fmt(v, Number.isInteger(v) ? 0 : 2);
+  return esc(String(v));
+}
+function renderFundamentals() {
+  const d = fundData;
+  if (!d || d.error) {
+    $("fundHead").innerHTML = `<p class="muted">${esc(d ? d.error : "加载中…")}</p>`;
+    ["fundStats", "fundStmt", "fundBars", "fundEarn", "fundNews"].forEach(id => $(id).innerHTML = "");
+    $("fundFoot").textContent = ""; return;
+  }
+  const p = d.profile || {};
+  const tags = [p.sector, p.industry, p.country, p.exchange, p.employees ? `员工 ${fmt(p.employees, 0)}` : null].filter(Boolean);
+  $("fundHead").innerHTML = `<h3>${esc(p.name)} <span class="muted" style="font-size:12px;font-weight:400">${esc(d.symbol)}${p.currency ? " · " + esc(p.currency) : ""}</span></h3>
+    <div class="muted" style="font-size:12px">${tags.map(esc).join(" · ")}${p.website ? ` · <a href="${esc(safeUrl(p.website))}" target="_blank" rel="noopener">${esc(p.website.replace(/^https?:\/\//, ""))}</a>` : ""}</div>
+    ${p.summary ? `<p>${esc(p.summary)}</p>` : ""}`;
+  $("fundStats").innerHTML = (d.stats || []).map(s => {
+    const cls = s.key === "target_upside" || s.key.endsWith("growth") ? (s.value >= 0 ? "up" : "down") : "";
+    return `<div class="metric"><span>${esc(s.label)}</span><b class="${cls}">${fmtStat(s)}</b></div>`;
+  }).join("");
+  const st = d[fundPeriod] || { periods: [], rows: [] };
+  $("fqBtn").classList.toggle("on", fundPeriod === "quarterly"); $("faBtn").classList.toggle("on", fundPeriod === "annual");
+  if (!st.periods.length) { $("fundStmt").innerHTML = '<tr><td class="muted">没有利润表数据</td></tr>'; $("fundBars").innerHTML = ""; }
+  else {
+    const label = (x) => fundPeriod === "annual" ? x.slice(0, 4) : x.slice(0, 7);
+    const growth = (vals, i) => {
+      const lag = fundPeriod === "quarterly" ? 4 : 1;
+      const a = vals[i], b = vals[i - lag];
+      return a != null && b ? `<div class="${a >= b ? "up" : "down"}" style="font-size:10px">${((a / Math.abs(b) - 1) * 100).toFixed(1)}%</div>` : "";
+    };
+    $("fundStmt").innerHTML = `<thead><tr><th></th>${st.periods.map(x => `<th class="num">${label(x)}</th>`).join("")}</tr></thead><tbody>` +
+      st.rows.map(r => `<tr><td>${esc(r.label)}</td>${r.values.map((v, i) => `<td class="num">${r.key === "eps" ? fmt(v, 2) : r.key === "net_margin" ? (v == null ? "—" : v.toFixed(1) + "%") : fmtMoney(v)}${["revenue", "net_income", "eps"].includes(r.key) ? growth(r.values, i) : ""}</td>`).join("")}</tr>`).join("") + "</tbody>";
+    const rev = (st.rows.find(r => r.key === "revenue") || {}).values || [];
+    const ni = (st.rows.find(r => r.key === "net_income") || {}).values || [];
+    const max = Math.max(1, ...rev.map(v => Math.abs(v || 0)), ...ni.map(v => Math.abs(v || 0)));
+    $("fundBars").innerHTML = st.periods.map((x, i) => `<div class="col"><div class="pair">
+      <div class="bar" title="营收 ${fmtMoney(rev[i])}" style="height:${Math.abs(rev[i] || 0) / max * 100}%;background:${css("--s1")}"></div>
+      <div class="bar" title="净利润 ${fmtMoney(ni[i])}" style="height:${Math.abs(ni[i] || 0) / max * 100}%;background:${css((ni[i] || 0) >= 0 ? "--up" : "--down")}"></div>
+    </div>${label(x)}</div>`).join("");
+  }
+  const earn = (d.events || []).filter(e => e.type === "earnings").slice().reverse();
+  $("fundEarn").innerHTML = earn.length ? `<thead><tr><th>日期</th><th class="num">预期 EPS</th><th class="num">实际 EPS</th><th class="num">超预期</th></tr></thead><tbody>` +
+    earn.map(e => `<tr><td>${new Date(e.time * 1000).toISOString().slice(0, 10)}${e.upcoming ? ' <span class="badge">即将</span>' : ""}</td><td class="num">${fmt(e.estimate)}</td><td class="num">${fmt(e.actual)}</td><td class="num">${e.surprise_pct == null ? "—" : pctHtml(e.surprise_pct)}</td></tr>`).join("") + "</tbody>"
+    : '<tr><td class="muted">没有财报日期数据</td></tr>';
+  $("fundNews").innerHTML = (d.news || []).length ? d.news.map(n => `<a href="${esc(safeUrl(n.url))}" target="_blank" rel="noopener">${esc(n.title)}<span>${esc(n.source || "")} · ${esc((n.published || "").slice(0, 10))}</span></a>`).join("")
+    : '<p class="muted" style="font-size:12px">最近两周热门雷达没有收录这只股票的新闻。</p>';
+  $("fundFoot").textContent = `数据来源 Yahoo Finance，每 12 小时更新一次（${d.fetched_at || ""}）。增速为同比（季度对比去年同季）。`;
+}
+$("fundBtn").onclick = async () => {
+  showBottom("fundView");
+  $("btTitle").textContent = "基本面"; $("btSub").textContent = state.symbol;
+  if (!fundData || fundData.symbol !== state.symbol) { fundData = null; renderFundamentals(); }
+  await loadFundamentals(); renderFundamentals();
+};
+$("fqBtn").onclick = () => { fundPeriod = "quarterly"; renderFundamentals(); };
+$("faBtn").onclick = () => { fundPeriod = "annual"; renderFundamentals(); };
+function renderEvtBtn() { $("evtBtn").classList.toggle("on", showEvents); }
+$("evtBtn").onclick = () => { showEvents = !showEvents; store.set("sp.events", showEvents); renderEvtBtn(); if (showEvents) loadFundamentals(); applyMarkers(); };
+renderEvtBtn();
+
 function setSymbol(sym, interval) {
   sym = (sym || "").trim().toUpperCase();
   if (!sym) return;
@@ -919,7 +1055,10 @@ function setSymbol(sym, interval) {
   if (interval) { state.interval = interval; store.set("sp.interval", interval); renderIntervals(); }
   $("symbolInput").value = sym;
   lastData = null;
-  loadChart();
+  loadChart().then(() => {
+    if (!$("fundView").hidden) $("fundBtn").click();
+    else if (showEvents) loadFundamentals();
+  });
   renderWatch();
 }
 $("symbolInput").addEventListener("keydown", (e) => { if (e.key === "Enter") setSymbol(e.target.value); });
@@ -1095,7 +1234,7 @@ function renderBacktest(bt, name) {
 
 function showBottom(view) {
   $("bottom").classList.add("open");
-  ["btView", "scanView", "optView", "tableView", "screenView"].forEach(v => $(v).hidden = v !== view);
+  ["btView", "scanView", "optView", "tableView", "screenView", "fundView"].forEach(v => $(v).hidden = v !== view);
 }
 
 // ---------------------------------------------------------------- optimizer
@@ -1397,7 +1536,7 @@ if (params.get("symbol")) state.symbol = params.get("symbol").toUpperCase();
 if (params.get("interval")) state.interval = params.get("interval");
 $("symbolInput").value = state.symbol;
 renderIntervals(); renderIndMenu(); renderScaleBtns();
-loadChart(); loadWatch();
+loadChart().then(() => { if (showEvents) loadFundamentals(); }); loadWatch();
 loadMeta().then(() => { configToForm(store.get("sp.draft", { name: "", interval: state.interval, symbols: [state.symbol] })); }).catch(() => {});
 loadStrategies().catch(() => {});
 const tab = store.get("sp.tab", "watch"); const tb = document.querySelector(`.tabs button[data-tab="${tab}"]`); if (tb) tb.click();

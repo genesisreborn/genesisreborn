@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StockPulse 多图</title>
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f5f7; --panel: #ffffff; --panel-2: #f7f8fa; --text: #131722; --muted: #5d6270; --line: #e0e3eb;
+  --accent: #2a78d6; --up: #089981; --down: #f23645;
+  --s1: #2a78d6; --s2: #eb6834; --chart-bg: #ffffff; --grid: #f0f2f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #0f1117; --panel: #161a23; --panel-2: #1c212c; --text: #e6e8ee; --muted: #9aa0ad; --line: #2a2f3b;
+    --accent: #3987e5; --up: #22ab94; --down: #f7525f; --s1: #3987e5; --s2: #d95926; --chart-bg: #131722; --grid: #1e2330;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1117; --panel: #161a23; --panel-2: #1c212c; --text: #e6e8ee; --muted: #9aa0ad; --line: #2a2f3b;
+  --accent: #3987e5; --up: #22ab94; --down: #f7525f; --s1: #3987e5; --s2: #d95926; --chart-bg: #131722; --grid: #1e2330;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); display: flex; flex-direction: column;
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+button, select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header a { color: var(--text); text-decoration: none; font-weight: 700; }
+header label { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+.seg { display: inline-flex; } .seg button { border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: 6px 0 0 6px; } .seg button:last-child { border-radius: 0 6px 6px 0; }
+.spacer { flex: 1; }
+.muted { color: var(--muted); }
+#grid { flex: 1; display: grid; gap: 1px; background: var(--line); min-height: 0; }
+.cell { background: var(--panel); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.cell.active { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 1; }
+.cell-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.cell-head input { width: 90px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; text-transform: uppercase; font-weight: 600; }
+.cell-head select { padding: 2px 4px; }
+.cell-head .px { font-weight: 600; font-variant-numeric: tabular-nums; }
+.cell-head a { color: var(--muted); text-decoration: none; margin-left: auto; padding: 0 4px; }
+.cell-head a:hover { color: var(--accent); }
+.cell-chart { flex: 1; position: relative; min-height: 0; }
+.cell-legend { position: absolute; left: 8px; top: 4px; z-index: 3; pointer-events: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.up { color: var(--up); } .down { color: var(--down); }
+@media (max-width: 700px) { #grid { grid-template-columns: 1fr !important; grid-template-rows: none !important; grid-auto-rows: 320px; overflow: auto; } }
+</style>
+</head>
+<body>
+<header>
+  <a href="/chart">📈 StockPulse</a>
+  <span class="muted">多图布局</span>
+  <div class="seg" id="layouts" role="group" aria-label="布局"></div>
+  <label><input type="checkbox" id="syncCross"> 同步十字光标</label>
+  <label><input type="checkbox" id="syncIv"> 同步周期</label>
+  <label><input type="checkbox" id="syncRange"> 同步时间范围</label>
+  <span class="spacer"></span>
+  <span class="muted" id="updated"></span>
+  <button id="themeBtn" title="切换主题" aria-label="切换主题">🌓</button>
+</header>
+<div id="grid"></div>
+<script>
+const LWC = LightweightCharts;
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+};
+const fmt = (v, d = 2) => v == null || Number.isNaN(v) ? "—" : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+const INTERVALS = [["1m", "1分"], ["5m", "5分"], ["15m", "15分"], ["1h", "1时"], ["1d", "日"], ["1wk", "周"]];
+// layout key -> [columns, rows, cells]
+const LAYOUTS = { "1": [1, 1, 1], "2": [2, 1, 2], "2v": [1, 2, 2], "3": [3, 1, 3], "4": [2, 2, 4], "6": [3, 2, 6], "8": [4, 2, 8] };
+const LAYOUT_LABEL = { "1": "1", "2": "2", "2v": "2↕", "3": "3", "4": "4", "6": "6", "8": "8" };
+const DEFAULT_SYMS = ["SPY", "QQQ", "AAPL", "NVDA", "MSFT", "TSLA", "AMZN", "META"];
+
+const saved = store.get("sp.multi", {});
+const state = {
+  layout: LAYOUTS[saved.layout] ? saved.layout : "4",
+  cells: Array.from({ length: 8 }, (_, i) => ({ symbol: DEFAULT_SYMS[i], interval: "1d", ...((saved.cells || [])[i] || {}) })),
+  syncCross: saved.syncCross ?? true, syncIv: saved.syncIv ?? false, syncRange: saved.syncRange ?? false,
+};
+const save = () => store.set("sp.multi", { layout: state.layout, cells: state.cells, syncCross: state.syncCross, syncIv: state.syncIv, syncRange: state.syncRange });
+let views = [];
+let syncing = false;
+
+function chartOptions(interval) {
+  return {
+    autoSize: true,
+    layout: { background: { color: css("--chart-bg") }, textColor: css("--muted"), fontSize: 10 },
+    grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
+    rightPriceScale: { borderColor: css("--line") },
+    timeScale: { borderColor: css("--line"), timeVisible: !["1d", "1wk"].includes(interval), secondsVisible: false, rightOffset: 5 },
+    crosshair: { mode: LWC.CrosshairMode.Normal },
+  };
+}
+
+function makeView(i) {
+  const cell = state.cells[i];
+  const el = document.createElement("div");
+  el.className = "cell";
+  el.innerHTML = `<div class="cell-head">
+      <input aria-label="代码" value="${cell.symbol}">
+      <select aria-label="周期">${INTERVALS.map(([k, l]) => `<option value="${k}" ${k === cell.interval ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <span class="px"></span><span class="chg"></span>
+      <a href="#" title="在完整图表中打开">↗</a>
+    </div><div class="cell-chart"><div class="cell-legend"></div></div>`;
+  $("grid").appendChild(el);
+  const box = el.querySelector(".cell-chart");
+  const chart = LWC.createChart(box, chartOptions(cell.interval));
+  const candles = chart.addSeries(LWC.CandlestickSeries, { upColor: css("--up"), downColor: css("--down"), borderVisible: false,
+    wickUpColor: css("--up"), wickDownColor: css("--down") });
+  const volume = chart.addSeries(LWC.HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "vol", lastValueVisible: false, priceLineVisible: false });
+  chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+  const emaFast = chart.addSeries(LWC.LineSeries, { color: css("--s1"), lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+  const emaSlow = chart.addSeries(LWC.LineSeries, { color: css("--s2"), lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+  const v = { i, el, chart, candles, volume, emaFast, emaSlow, byTime: new Map(), bars: [] };
+  const input = el.querySelector("input"), sel = el.querySelector("select");
+  const setSym = () => {
+    const s = input.value.trim().toUpperCase();
+    if (s && s !== cell.symbol) { cell.symbol = s; save(); load(v, true); }
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { setSym(); input.blur(); } });
+  input.addEventListener("change", setSym);
+  sel.onchange = () => {
+    if (state.syncIv) { state.cells.forEach(c => c.interval = sel.value); save(); render(); return; }
+    cell.interval = sel.value; save();
+    chart.applyOptions(chartOptions(cell.interval)); load(v, true);
+  };
+  el.querySelector("a").onclick = (e) => { e.preventDefault(); location.href = `/chart?symbol=${encodeURIComponent(cell.symbol)}&interval=${cell.interval}`; };
+  el.addEventListener("mousedown", () => { views.forEach(o => o.el.classList.toggle("active", o === v)); });
+  chart.subscribeCrosshairMove((p) => {
+    legend(v, p && p.time != null ? v.byTime.get(p.time) : null);
+    if (!state.syncCross || syncing) return;
+    syncing = true;
+    views.forEach(o => {
+      if (o === v) return;
+      const b = p && p.time != null ? nearest(o, p.time) : null;
+      if (b) o.chart.setCrosshairPosition(b.close, b.time, o.candles); else o.chart.clearCrosshairPosition();
+    });
+    syncing = false;
+  });
+  chart.timeScale().subscribeVisibleTimeRangeChange((r) => {
+    if (!state.syncRange || syncing || !r) return;
+    syncing = true;
+    views.forEach(o => { if (o !== v && o.bars.length) { try { o.chart.timeScale().setVisibleRange(r); } catch (e) {} } });
+    syncing = false;
+  });
+  return v;
+}
+
+// last bar at or before t (different symbols / intervals do not share timestamps exactly)
+function nearest(v, t) {
+  const bars = v.bars;
+  if (!bars.length || t < bars[0].time) return null;
+  let lo = 0, hi = bars.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (bars[mid].time <= t) lo = mid; else hi = mid - 1; }
+  return bars[lo];
+}
+
+function legend(v, b) {
+  b = b || v.bars[v.bars.length - 1];
+  const lg = v.el.querySelector(".cell-legend");
+  if (!b) { lg.textContent = ""; return; }
+  const cls = b.close >= b.open ? "up" : "down";
+  lg.innerHTML = `开 <span class="${cls}">${fmt(b.open)}</span> 高 <span class="${cls}">${fmt(b.high)}</span> 低 <span class="${cls}">${fmt(b.low)}</span> 收 <span class="${cls}">${fmt(b.close)}</span>
+    <br><span style="color:${css("--s1")}">EMA 20</span> · <span style="color:${css("--s2")}">EMA 50</span>`;
+}
+
+async function load(v, fit = false) {
+  const cell = state.cells[v.i];
+  const q = new URLSearchParams({ symbol: cell.symbol, interval: cell.interval, limit: 600, indicators: "f=ema:20,s=ema:50" });
+  let d;
+  try {
+    const res = await fetch("/api/chart?" + q);
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+    d = await res.json();
+  } catch (e) {
+    v.el.querySelector(".cell-legend").textContent = "无法加载：" + e.message; return;
+  }
+  if (cell.symbol !== d.symbol || cell.interval !== d.interval) return;   // changed while loading
+  v.bars = d.bars; v.byTime = new Map(d.bars.map(b => [b.time, b]));
+  v.candles.setData(d.bars.map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
+  v.volume.setData(d.bars.map(b => ({ time: b.time, value: b.volume, color: b.close >= b.open ? css("--up") + "55" : css("--down") + "55" })));
+  const ser = (uid) => (d.series.find(s => s.uid === uid) || { data: [] }).data;
+  v.emaFast.setData(ser("f")); v.emaSlow.setData(ser("s"));
+  if (fit) v.chart.timeScale().fitContent();
+  const l = d.last;
+  v.el.querySelector(".px").textContent = fmt(l.price, l.price < 10 ? 4 : 2);
+  const chg = v.el.querySelector(".chg");
+  chg.className = "chg " + (l.change_pct >= 0 ? "up" : "down");
+  chg.textContent = (l.change_pct >= 0 ? "+" : "") + fmt(l.change_pct) + "%";
+  legend(v, null);
+  $("updated").textContent = "更新于 " + new Date().toLocaleTimeString();
+}
+
+function render() {
+  views.forEach(v => v.chart.remove());
+  views = [];
+  $("grid").innerHTML = "";
+  const [cols, rows, n] = LAYOUTS[state.layout];
+  $("grid").style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  $("grid").style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+  for (let i = 0; i < n; i++) views.push(makeView(i));
+  views.forEach(v => load(v, true));
+  $("layouts").innerHTML = Object.keys(LAYOUTS).map(k => `<button data-l="${k}" class="${k === state.layout ? "on" : ""}" title="${LAYOUTS[k][2]} 个图">${LAYOUT_LABEL[k]}</button>`).join("");
+  $("layouts").querySelectorAll("button").forEach(b => b.onclick = () => { state.layout = b.dataset.l; save(); render(); });
+}
+
+["syncCross", "syncIv", "syncRange"].forEach(k => {
+  $(k).checked = state[k];
+  $(k).onchange = () => {
+    state[k] = $(k).checked; save();
+    if (k === "syncIv" && state.syncIv) { const iv = state.cells[0].interval; state.cells.forEach(c => c.interval = iv); save(); render(); }
+  };
+});
+$("themeBtn").onclick = () => {
+  const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = dark ? "light" : "dark";
+  store.set("theme", document.documentElement.dataset.theme);
+  render();
+};
+(() => { const t = store.get("theme", null); if (t) document.documentElement.dataset.theme = t; })();
+render();
+setInterval(() => { if (!document.hidden) views.forEach(v => load(v)); }, 30000);
+</script>
+</body>
+</html>

@@ -32,6 +32,9 @@
 - **K 线回放**：从任意位置开始逐根 / 自动播放（1x–10x），用来练习看盘和人工验证策略，回放中未来数据不可见。
 - **数据表**：把当前图表的 OHLCV 和所有指标值列成表，可导出 CSV（Excel 直接打开不乱码）。
 - **股票筛选器**：对自选 + 热门股（或你填的代码）计算价格、涨跌、量比、1 周 ~ 1 年表现、RSI、ADX、ATR%、距 50/200 日线、距 52 周高低点；表头点击排序，可用规则语法过滤（例如 `rsi(close, 14) < 35 and close > sma(close, 200)`），点行打开图表。
+- **基本面**：公司简介、估值（市值、市盈率、市销率、市净率、EV/EBITDA、PEG）、盈利能力（毛利率、净利率、ROE）、财务健康、股息、做空比例、机构持股、分析师目标价和评级；季度 / 年度利润表（营收、毛利、营业利润、净利润、EPS，带同比增速和柱状图）；历次财报的预期 vs 实际 EPS；热门雷达收录的该股新闻。数据来自 Yahoo Finance，缓存 12 小时。
+- **事件标记**：K 线下方标出财报 (E)、分红 (D)、拆股 (S)，可用“事件”按钮开关。
+- **多图布局**（`/multi`）：1 / 2 / 3 / 4 / 6 / 8 图，每个格子独立选代码和周期；可同步十字光标、周期、时间范围；布局记在浏览器里，点 ↗ 打开完整图表。
 - 十字光标显示 OHLC、涨跌幅、成交量和所有指标值；数据每 30 秒自动刷新，K 线未收盘时会标“K 线进行中”。
 - 自选列表：美股、港股（`0700.HK`）、A 股（`600519.SS`）、加密货币（`BTC-USD`，仅 Yahoo 数据源）。
 
@@ -250,6 +253,8 @@ cp .env.example .env && docker compose up -d --build
 | `POST /api/refresh` | 立即触发一轮分析 |
 | `POST /api/telegram/test` | 把最新一份报告推送到 Telegram（不调用 Claude） |
 | `/chart` | 图表 · 策略页面 |
+| `/multi` | 多图布局 |
+| `GET /api/fundamentals?symbol=AAPL` | 基本面、利润表、财报 / 分红事件、相关新闻 |
 | `GET /api/chart?symbol=AAPL&interval=1d&indicators=ema:20,rsi:14,macd` | K 线 + 指标数据 |
 | `GET /api/strategy/meta` | 内置模板、可用函数、周期 |
 | `GET/POST /api/strategies`、`DELETE /api/strategies/{id}` | 策略列表 / 保存 / 删除 |
@@ -295,7 +300,7 @@ stockpulse/
   broker.py         Alpaca 下单与风控闸门
   telegram_bot.py   推送与机器人命令
   scheduler.py      定时任务
-  web/              FastAPI；static/index.html 热门雷达，static/chart.html 图表策略页，trading.py 图表/策略 API
+  web/              FastAPI；static/index.html 热门雷达，static/chart.html 图表策略页，static/multi.html 多图，trading.py 图表/策略 API
 tests/              单元测试与端到端测试
 setup.sh            一键安装脚本
 deploy/             systemd 服务模板
@@ -316,4 +321,4 @@ deploy/             systemd 服务模板
 - 热度 ≠ 涨幅。社交媒体热度很容易被炒作带动，评分只代表“正在被关注且舆论偏正面”，不预测价格。
 - 免费数据源有频率限制，偶尔会失败；单个源失败不影响整轮分析。
 - Yahoo 行情有延迟，不适合日内交易。
-- 和 TradingView 相比没有：社区观点 / 脚本库、财报和基本面数据、期权链、多图布局、完整的 Pine Script（这里是简化的规则语法）。
+- 和 TradingView 相比没有：社区观点 / 脚本库、期权链、经济日历、完整的 Pine Script（这里是简化的规则语法）。基本面只有利润表，没有资产负债表和现金流量表明细。
