@@ -73,6 +73,24 @@ STATEMENT_ROWS = [
     (("Diluted EPS", "Basic EPS"), "eps", "每股收益"),
 ]
 
+BALANCE_ROWS = [
+    (("Total Assets",), "total_assets", "总资产"),
+    (("Total Liabilities Net Minority Interest", "Total Liabilities"), "total_liabilities", "总负债"),
+    (("Stockholders Equity", "Common Stock Equity"), "equity", "股东权益"),
+    (("Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents"), "cash", "现金及短期投资"),
+    (("Total Debt",), "total_debt", "总债务"),
+    (("Net Debt",), "net_debt", "净债务"),
+    (("Working Capital",), "working_capital", "营运资本"),
+]
+
+CASHFLOW_ROWS = [
+    (("Operating Cash Flow", "Cash Flow From Continuing Operating Activities"), "operating_cf", "经营现金流"),
+    (("Capital Expenditure",), "capex", "资本开支"),
+    (("Free Cash Flow",), "free_cf", "自由现金流"),
+    (("Repurchase Of Capital Stock",), "buyback", "股票回购"),
+    (("Cash Dividends Paid", "Common Stock Dividend Paid"), "dividends_paid", "分红支出"),
+]
+
 RECOMMENDATIONS = {"strong_buy": "强烈买入", "buy": "买入", "hold": "持有", "underperform": "跑输大盘",
                    "sell": "卖出", "none": "—"}
 
@@ -89,13 +107,13 @@ def _clean(v: Any) -> Any:
         return v
 
 
-def _statement(df: pd.DataFrame | None, periods: int) -> dict:
+def _statement(df: pd.DataFrame | None, periods: int, rows=STATEMENT_ROWS) -> dict:
     """yfinance statement (rows = items, columns = period ends, newest first) -> {periods, rows}."""
     if df is None or df.empty:
         return {"periods": [], "rows": []}
     cols = sorted(df.columns, key=lambda c: pd.Timestamp(c))[-periods:]
     out_rows = []
-    for names, key, label in STATEMENT_ROWS:
+    for names, key, label in rows:
         name = next((n for n in names if n in df.index), None)
         if name is None:
             continue
@@ -140,7 +158,9 @@ def _events(t: Any) -> list[dict]:
 
 
 def build_payload(symbol: str, info: dict, quarterly: pd.DataFrame | None, annual: pd.DataFrame | None,
-                  events: list[dict]) -> dict:
+                  events: list[dict], extra: dict[str, pd.DataFrame | None] | None = None) -> dict:
+    """``extra``: balance_q / balance_a / cashflow_q / cashflow_a statements (yfinance layout)."""
+    extra = extra or {}
     stats = []
     for key, label, field, fmt in STATS:
         v = _clean(info.get(field))
@@ -168,6 +188,10 @@ def build_payload(symbol: str, info: dict, quarterly: pd.DataFrame | None, annua
         "stats": stats,
         "quarterly": _statement(quarterly, 8),
         "annual": _statement(annual, 5),
+        "balance": {"quarterly": _statement(extra.get("balance_q"), 8, BALANCE_ROWS),
+                    "annual": _statement(extra.get("balance_a"), 5, BALANCE_ROWS)},
+        "cashflow": {"quarterly": _statement(extra.get("cashflow_q"), 8, CASHFLOW_ROWS),
+                     "annual": _statement(extra.get("cashflow_a"), 5, CASHFLOW_ROWS)},
         "events": events,
         "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
@@ -180,15 +204,15 @@ def fetch_yahoo(symbol: str) -> dict:
     info = t.info or {}
     if not info or (len(info) <= 2 and "trailingPegRatio" in info):
         raise LookupError(f"no fundamentals for {symbol}")
-    try:
-        q = t.quarterly_income_stmt
-    except Exception:  # noqa: BLE001
-        q = None
-    try:
-        a = t.income_stmt
-    except Exception:  # noqa: BLE001
-        a = None
-    return build_payload(symbol, info, q, a, _events(t))
+    def stmt(attr: str) -> pd.DataFrame | None:
+        try:
+            return getattr(t, attr)
+        except Exception:  # noqa: BLE001 - optional data
+            return None
+
+    extra = {"balance_q": stmt("quarterly_balance_sheet"), "balance_a": stmt("balance_sheet"),
+             "cashflow_q": stmt("quarterly_cashflow"), "cashflow_a": stmt("cashflow")}
+    return build_payload(symbol, info, stmt("quarterly_income_stmt"), stmt("income_stmt"), _events(t), extra)
 
 
 def demo_fundamentals(symbol: str) -> dict:
@@ -244,7 +268,20 @@ def demo_fundamentals(symbol: str) -> dict:
         for c in q_ends:
             events.append({"time": int((c + timedelta(days=40)).timestamp()), "type": "dividend",
                            "text": f"分红 {price * info['dividendYield'] / 4:.3f}"})
-    return build_payload(symbol, info, q, a, sorted(events, key=lambda e: e["time"]))
+    def balance(ends, revs):
+        return pd.DataFrame({c: {"Total Assets": r * 3, "Total Liabilities Net Minority Interest": r * 1.4,
+                                 "Stockholders Equity": r * 1.6, "Cash Cash Equivalents And Short Term Investments": r * 0.5,
+                                 "Total Debt": r * 0.6, "Net Debt": r * 0.1, "Working Capital": r * 0.3}
+                             for c, r in zip(ends, revs)})
+
+    def cashflow(ends, revs):
+        return pd.DataFrame({c: {"Operating Cash Flow": r * (margin + 0.08), "Capital Expenditure": -r * 0.06,
+                                 "Free Cash Flow": r * (margin + 0.02), "Repurchase Of Capital Stock": -r * 0.04,
+                                 "Cash Dividends Paid": -r * 0.02} for c, r in zip(ends, revs)})
+
+    extra = {"balance_q": balance(q_ends, [r * 4 for r in q_rev]), "balance_a": balance(a_ends, a_rev),
+             "cashflow_q": cashflow(q_ends, q_rev), "cashflow_a": cashflow(a_ends, a_rev)}
+    return build_payload(symbol, info, q, a, sorted(events, key=lambda e: e["time"]), extra)
 
 
 def get_fundamentals(db: Database, settings: Settings, symbol: str, refresh: bool = False) -> dict:

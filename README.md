@@ -32,7 +32,20 @@
 - **K 线回放**：从任意位置开始逐根 / 自动播放（1x–10x），用来练习看盘和人工验证策略，回放中未来数据不可见。
 - **数据表**：把当前图表的 OHLCV 和所有指标值列成表，可导出 CSV（Excel 直接打开不乱码）。
 - **股票筛选器**：对自选 + 热门股（或你填的代码）计算价格、涨跌、量比、1 周 ~ 1 年表现、RSI、ADX、ATR%、距 50/200 日线、距 52 周高低点；表头点击排序，可用规则语法过滤（例如 `rsi(close, 14) < 35 and close > sma(close, 200)`），点行打开图表。
-- **基本面**：公司简介、估值（市值、市盈率、市销率、市净率、EV/EBITDA、PEG）、盈利能力（毛利率、净利率、ROE）、财务健康、股息、做空比例、机构持股、分析师目标价和评级；季度 / 年度利润表（营收、毛利、营业利润、净利润、EPS，带同比增速和柱状图）；历次财报的预期 vs 实际 EPS；热门雷达收录的该股新闻。数据来自 Yahoo Finance，缓存 12 小时。
+- **指标脚本编辑器**（工具 → 指标脚本编辑器）：类似 Pine Script 写自己的指标，保存后像内置指标一样加到图上，可叠加主图或放副图；单独一行的数字（如 `length = 20`）自动变成可在“指标”菜单里调的参数。
+
+  ```
+  length = 20
+  basis = sma(close, length)
+  dev = 2 * stdev(close, length)
+  plot(basis, "中轨", "#2962ff")
+  plot(basis + dev, "上轨")
+  plotshape(crossover(close, basis + dev), "突破", "up")
+  ```
+  语句：`变量 = 表达式`、`plot(值, "标题", "#颜色", "line|histogram|dots|area")`、`hline(值, "标题")`、`plotshape(条件, "标题", "up|down")`。表达式和策略规则同一套（含 `ref_close("SPY")`、`close[1]`、`a if 条件 else b`），内置 4 个示例。
+- **期权链**：按到期日列出认购 / 认沽的最新价、买卖价、涨跌、隐含波动率、成交量、持仓量，实值高亮、平值分隔；汇总 Put/Call 比（成交、持仓）、最大痛点、平值 IV。缓存 15 分钟。
+- **财经日历**：按周查看经济数据（CPI、非农、利率决议等，实际 / 预期 / 前值）和财报日历（盘前 / 盘后、预期与实际 EPS），自选股高亮，点击跳到图表。
+- **基本面**：公司简介、估值（市值、市盈率、市销率、市净率、EV/EBITDA、PEG）、盈利能力（毛利率、净利率、ROE）、财务健康、股息、做空比例、机构持股、分析师目标价和评级；季度 / 年度利润表、资产负债表、现金流量表（带同比增速和柱状图）；历次财报的预期 vs 实际 EPS；热门雷达收录的该股新闻。数据来自 Yahoo Finance，缓存 12 小时。
 - **事件标记**：K 线下方标出财报 (E)、分红 (D)、拆股 (S)，可用“事件”按钮开关。
 - **多图布局**（`/multi`）：1 / 2 / 3 / 4 / 6 / 8 图，每个格子独立选代码和周期；可同步十字光标、周期、时间范围；布局记在浏览器里，点 ↗ 打开完整图表。
 - 十字光标显示 OHLC、涨跌幅、成交量和所有指标值；数据每 30 秒自动刷新，K 线未收盘时会标“K 线进行中”。
@@ -54,7 +67,7 @@
 ```
 
 - 行情变量：`open high low close volume hl2 hlc3 ohlc4`；`close[1]` 是前一根 K 线的值。
-- 函数：`sma ema wma rsi macd macd_signal macd_hist bb_upper bb_mid bb_lower stoch_k stoch_d atr adx plus_di minus_di cci willr mfi roc psar kc_upper kc_lower vwap supertrend supertrend_dir obv highest lowest crossover crossunder prev change rising falling abs max min`。
+- 函数：`stdev sum cum nz barssince valuewhen log sqrt pow round sma ema wma rsi macd macd_signal macd_hist bb_upper bb_mid bb_lower stoch_k stoch_d atr adx plus_di minus_di cci willr mfi roc psar kc_upper kc_lower vwap supertrend supertrend_dir obv highest lowest crossover crossunder prev change rising falling abs max min`。
 - 运算：`and or not`、比较、加减乘除。表达式在服务器上用白名单解析，不能执行任意代码。
 - **引用其他代码**（同周期）：`ref_close("SPY")`、`ref_high/ref_low/ref_open/ref_volume`。最常用的是大盘过滤：`ref_close("SPY") > sma(ref_close("SPY"), 200)`，只在大盘处于长期上升趋势时开仓。
 - **按风险定仓位**：填“单笔风险 %”（例如 1），系统按“碰到止损约亏账户 1%”自动算股数（需要设止损），“每笔占账户 %”变成仓位上限。回测、模拟账户和券商下单都按这个算。
@@ -254,7 +267,10 @@ cp .env.example .env && docker compose up -d --build
 | `POST /api/telegram/test` | 把最新一份报告推送到 Telegram（不调用 Claude） |
 | `/chart` | 图表 · 策略页面 |
 | `/multi` | 多图布局 |
-| `GET /api/fundamentals?symbol=AAPL` | 基本面、利润表、财报 / 分红事件、相关新闻 |
+| `GET /api/fundamentals?symbol=AAPL` | 基本面、三张报表、财报 / 分红事件、相关新闻 |
+| `GET /api/options?symbol=AAPL&expiry=2026-11-20` | 期权链 + Put/Call 比、最大痛点 |
+| `GET /api/calendar?start=2026-10-19&days=7` | 经济数据和财报日历 |
+| `GET/POST /api/scripts`、`DELETE /api/scripts/{id}` | 指标脚本（保存需 token） |
 | `GET /api/chart?symbol=AAPL&interval=1d&indicators=ema:20,rsi:14,macd` | K 线 + 指标数据 |
 | `GET /api/strategy/meta` | 内置模板、可用函数、周期 |
 | `GET/POST /api/strategies`、`DELETE /api/strategies/{id}` | 策略列表 / 保存 / 删除 |
@@ -321,4 +337,4 @@ deploy/             systemd 服务模板
 - 热度 ≠ 涨幅。社交媒体热度很容易被炒作带动，评分只代表“正在被关注且舆论偏正面”，不预测价格。
 - 免费数据源有频率限制，偶尔会失败；单个源失败不影响整轮分析。
 - Yahoo 行情有延迟，不适合日内交易。
-- 和 TradingView 相比没有：社区观点 / 脚本库、期权链、经济日历、完整的 Pine Script（这里是简化的规则语法）。基本面只有利润表，没有资产负债表和现金流量表明细。
+- 和 TradingView 相比没有：社区观点、公开脚本库这类社交功能。指标脚本是 Pine Script 的子集：没有循环、数组、`var` 状态变量、自定义函数和 `strategy.*` 下单语句（下单逻辑用策略规则写）。

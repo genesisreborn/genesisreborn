@@ -37,6 +37,13 @@ def _bool(x, index) -> pd.Series:
     return s.fillna(False).astype(bool) if s.dtype == bool or s.dtype == object else (s.fillna(0) != 0)
 
 
+def _barssince(cond: pd.Series) -> pd.Series:
+    """Bars since cond was last true (NaN before the first occurrence)."""
+    grp = cond.cumsum()
+    out = cond.groupby(grp).cumcount().astype(float)
+    return out.where(grp > 0)
+
+
 def build_functions(df: pd.DataFrame) -> dict[str, Callable[..., Any]]:
     idx = df.index
     S = lambda x: _series(x, idx)  # noqa: E731
@@ -78,6 +85,16 @@ def build_functions(df: pd.DataFrame) -> dict[str, Callable[..., Any]]:
         "change": lambda src, n=1: S(src).pct_change(int(n), fill_method=None) * 100,
         "rising": lambda src, n=1: (S(src).diff() > 0).astype(float).rolling(int(n)).sum() == int(n),
         "falling": lambda src, n=1: (S(src).diff() < 0).astype(float).rolling(int(n)).sum() == int(n),
+        "stdev": lambda src, n=20: S(src).rolling(int(n), min_periods=int(n)).std(ddof=0),
+        "sum": lambda src, n=20: S(src).rolling(int(n), min_periods=int(n)).sum(),
+        "cum": lambda src: S(src).cumsum(),
+        "nz": lambda src, v=0: S(src).fillna(v),
+        "barssince": lambda cond: _barssince(_bool(cond, idx)),
+        "valuewhen": lambda cond, src: S(src).where(_bool(cond, idx)).ffill(),
+        "log": lambda x: np.log(S(x)),
+        "sqrt": lambda x: np.sqrt(S(x)),
+        "pow": lambda x, y: S(x) ** y,
+        "round": lambda x, d=0: S(x).round(int(d)),
         "abs": lambda x: S(x).abs(),
         "max": lambda a, b: np.maximum(S(a), S(b)),
         "min": lambda a, b: np.minimum(S(a), S(b)),

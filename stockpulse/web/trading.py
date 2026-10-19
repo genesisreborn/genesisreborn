@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import math
 import threading
-from datetime import timedelta
+import re
+import uuid
+from datetime import date, timedelta
 from typing import Any, Callable
 
 import pandas as pd
@@ -12,7 +14,9 @@ from fastapi import APIRouter, Body, HTTPException
 
 from .. import indicators as ind
 from ..db import utcnow
+from ..calendar_data import get_calendar
 from ..fundamentals import get_fundamentals
+from ..options import get_chain
 from ..market_data import INTERVALS, closed_bars
 from ..strategy import StrategyConfig
 from ..strategy.backtest import run_backtest
@@ -22,6 +26,7 @@ from ..strategy.alerts import Alert
 from ..strategy.optimize import OBJECTIVES, OptimizeError, optimize
 from ..strategy.refs import load_refs
 from ..strategy.screener import run_screener
+from ..strategy.script import EXAMPLES as SCRIPT_EXAMPLES, run_script, script_refs, validate_script
 from ..strategy.scanner import MAX_SYMBOLS, scan
 from ..strategy.signals import SignalEngine
 
@@ -154,10 +159,19 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
         symbol = symbol.upper().strip()
         df = load(symbol, interval, limit)
         series: list[dict] = []
+        script_errors: list[str] = []
         for raw in [x.strip() for x in indicators.split(",") if x.strip()][:20]:
             # "uid=spec" lets the client draw several instances of the same indicator
-            uid, _, spec = raw.rpartition("=")
-            for s in indicator_series(df, spec):
+            uid, _, spec = raw.partition("=") if "=" in raw and not raw.startswith("script:") else ("", "", raw)
+            if spec.startswith("script:"):
+                try:
+                    out = script_series(df, spec, interval)
+                except DSLError as exc:
+                    script_errors.append(str(exc))
+                    continue
+            else:
+                out = indicator_series(df, spec)
+            for s in out:
                 if uid:
                     s = {**s, "id": f"{uid}|{s['id']}", "uid": uid,
                          "pane": s["pane"] if s["pane"] in ("price", "volume") else f"{uid}|{s['pane']}"}
@@ -172,7 +186,110 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
             "last": {"price": round(float(last), 4), "change_pct": round((last / prev - 1) * 100, 2),
                      "time": bars[-1]["time"], "forming": len(closed) < len(df)},
             "signals": [s for s in db.list_signals(200, symbol) if s["interval"] == interval],
+            "script_errors": script_errors,
         }
+
+    # ---------------------------------------------------------------- custom indicator scripts
+    def get_scripts() -> list[dict]:
+        raw = db.get_kv("scripts")
+        return json.loads(raw) if raw else []
+
+    def script_series(df: pd.DataFrame, spec: str, interval: str) -> list[dict]:
+        """spec 'script:ID' or 'script:ID:len=30;mult=2' -> chart series (plots, hlines as levels, shapes)."""
+        _, sid, *rest = spec.split(":", 2)
+        sc = next((x for x in get_scripts() if x["id"] == sid), None)
+        if sc is None:
+            raise DSLError(f"脚本 {sid} 不存在（可能已删除）")
+        inputs = {}
+        for kv in (rest[0] if rest else "").split(";"):
+            k, _, v = kv.partition("=")
+            try:
+                inputs[k.strip()] = float(v)
+            except ValueError:
+                pass
+        refs = {}
+        for sym in script_refs(sc["source"]):
+            store.maybe_update(sym, interval, min_gap_s=300)
+            refs[sym] = store.get(sym, interval, len(df) + 50)
+        try:
+            res = run_script(sc["source"], df, inputs, refs=refs)
+        except DSLError as exc:
+            raise DSLError(f"{sc['name']}：{exc}") from exc
+        pane = "price" if sc.get("overlay") else spec
+        levels = [h["value"] for h in res["hlines"]]
+        out = []
+        for i, p in enumerate(res["plots"]):
+            out.append({"id": f"{spec}:{i}", "name": p["title"], "pane": pane, "kind": p["kind"], "color": p["color"],
+                        "group": spec, "levels": levels if i == 0 else [], "data": p["data"]})
+        if not out and levels:   # hline-only script: draw an invisible carrier for the levels
+            out.append({"id": f"{spec}:h", "name": sc["name"], "pane": pane, "kind": "line", "color": "#00000000",
+                        "group": spec, "levels": levels, "data": [{"time": int(df.index[-1].timestamp()), "value": levels[0]}]})
+        for i, sh in enumerate(res["shapes"]):
+            out.append({"id": f"{spec}:s{i}", "name": sh["title"], "pane": "price", "kind": "shape", "color": sh["color"],
+                        "group": spec, "direction": sh["direction"], "data": [{"time": t, "value": 0} for t in sh["times"]]})
+        return out
+
+    @r.get("/scripts")
+    def list_scripts():
+        return {"scripts": get_scripts(), "examples": SCRIPT_EXAMPLES}
+
+    @r.post("/scripts/validate")
+    def check_script(body: dict[str, Any] = Body(...)):
+        try:
+            return {"ok": True, "inputs": validate_script(str(body.get("source", "")))}
+        except DSLError as exc:
+            return {"ok": False, "errors": [str(exc)]}
+
+    @r.post("/scripts")
+    def save_script(body: dict[str, Any] = Body(...), _=require_token):
+        name = str(body.get("name", "")).strip()[:60] or "自定义指标"
+        source = str(body.get("source", ""))
+        if len(source) > 20_000:
+            raise HTTPException(400, "脚本太长")
+        try:
+            inputs = validate_script(source)
+        except DSLError as exc:
+            raise HTTPException(400, {"errors": [str(exc)]}) from exc
+        scripts = get_scripts()
+        sid = str(body.get("id") or "")
+        item = {"id": sid if re.fullmatch(r"[a-z0-9]{6,16}", sid) else uuid.uuid4().hex[:10], "name": name,
+                "overlay": bool(body.get("overlay")), "source": source, "inputs": inputs}
+        scripts = [x for x in scripts if x["id"] != item["id"]] + [item]
+        if len(scripts) > 100:
+            raise HTTPException(400, "最多保存 100 个脚本")
+        db.set_kv("scripts", json.dumps(scripts, ensure_ascii=False))
+        return item
+
+    @r.delete("/scripts/{sid}")
+    def delete_script(sid: str, _=require_token):
+        scripts = get_scripts()
+        db.set_kv("scripts", json.dumps([x for x in scripts if x["id"] != sid], ensure_ascii=False))
+        return {"deleted": sid}
+
+    # ---------------------------------------------------------------- options + calendar
+    @r.get("/options")
+    def options(symbol: str, expiry: str | None = None):
+        sym = symbol.upper().strip()
+        if not sym or len(sym) > 20:
+            raise HTTPException(400, "代码无效")
+        try:
+            return get_chain(db, settings, sym, expiry or None)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"期权数据获取失败：{exc}") from exc
+
+    @r.get("/calendar")
+    def calendar(start: str | None = None, days: int = 7):
+        try:
+            d0 = date.fromisoformat(start) if start else date.today() - timedelta(days=date.today().weekday())
+        except ValueError as exc:
+            raise HTTPException(400, "start 格式应为 YYYY-MM-DD") from exc
+        symbols = list(db.get_watchlist(settings.watchlist))
+        try:
+            return get_calendar(db, settings, d0, days, symbols)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(502, f"日历获取失败：{exc}") from exc
 
     # ---------------------------------------------------------------- drawings (per symbol, shared across intervals)
     @r.get("/drawings")

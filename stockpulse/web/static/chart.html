@@ -125,6 +125,25 @@ th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line
 th { color: var(--muted); font-weight: 500; font-size: 11px; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.click { cursor: pointer; } tr.click:hover { background: var(--panel-2); }
+.tool-menu { min-width: 200px; padding: 4px; left: auto; right: 0; }
+.tool-menu button, .tool-menu a { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 7px 10px; border-radius: 6px;
+  color: var(--text); text-decoration: none; font-size: 13px; }
+.tool-menu button:hover, .tool-menu a:hover { background: var(--panel-2); }
+.script-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 14px; padding: 10px 12px; }
+@media (max-width: 900px) { .script-grid { grid-template-columns: 1fr; } }
+#scSource { width: 100%; min-height: 260px; resize: vertical; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px; tab-size: 4; }
+.sc-item { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.sc-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-help { font-size: 12px; color: var(--muted); line-height: 1.7; }
+.sc-help code { background: var(--panel-2); padding: 1px 4px; border-radius: 4px; color: var(--text); }
+table.chain td, table.chain th { padding: 4px 6px; font-size: 12px; }
+table.chain td.itm { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+table.chain td.strike { text-align: center; font-weight: 700; background: var(--panel-2); }
+table.chain tr.atm td { border-top: 2px solid var(--accent); }
+table.chain th.ch-side { text-align: center; font-weight: 600; color: var(--text); }
+.cal-day td { background: var(--panel-2); font-weight: 600; }
+tr.watched td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .btn-link { color: var(--text); text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font-size: 13px; }
 .btn-link:hover { background: var(--panel-2); }
 #evtBtn.on { color: var(--accent); border-color: var(--accent); }
@@ -194,11 +213,19 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
     <div class="seg" role="group" aria-label="坐标"><button id="scaleLog" title="对数坐标">对数</button><button id="scalePct" title="百分比坐标">%</button></div>
     <button id="cmpBtn" title="叠加其他代码对比">＋对比</button>
     <button id="replayBtn" title="K 线回放">⏪ 回放</button>
-    <button id="tableBtn" title="K 线和指标数据表">数据表</button>
-    <button id="screenBtn" title="股票筛选器">筛选器</button>
-    <button id="fundBtn" title="公司资料、估值、财报">基本面</button>
     <button id="evtBtn" title="在 K 线上标出财报 (E)、分红 (D)、拆股 (S)">事件</button>
-    <a class="btn-link" href="/multi" title="多图布局">多图</a>
+    <div class="dropdown">
+      <button id="toolBtn" aria-haspopup="true">工具 ▾</button>
+      <div class="menu tool-menu" id="toolMenu">
+        <button id="scriptBtn">📝 指标脚本编辑器</button>
+        <button id="tableBtn">📋 数据表 / 导出 CSV</button>
+        <button id="screenBtn">🔎 股票筛选器</button>
+        <button id="fundBtn">🏢 基本面 / 财报</button>
+        <button id="chainBtn">🧾 期权链</button>
+        <button id="calBtn">📅 财经日历</button>
+        <a href="/multi">🪟 多图布局</a>
+      </div>
+    </div>
     <div class="quote"><span class="px" id="qPx">—</span><span id="qChg"></span></div>
     <span class="spacer"></span>
     <span class="badge" id="provider">—</span>
@@ -277,13 +304,64 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
           <div class="muted" style="font-size:11px;padding:0 12px" id="scrInfo"></div>
           <div style="overflow:auto;padding:4px 12px 12px"><table id="scrTable"></table></div>
         </div>
+        <div id="scriptView" hidden>
+          <div class="script-grid">
+            <div>
+              <div class="row" style="gap:8px;padding:0 0 6px">
+                <input id="scName" placeholder="指标名称" style="flex:2">
+                <label style="flex:0 0 auto;display:flex;gap:4px;align-items:center"><input type="checkbox" id="scOverlay"> 叠加在主图</label>
+                <select id="scExample" style="flex:1"><option value="">载入示例…</option></select>
+              </div>
+              <textarea id="scSource" spellcheck="false" placeholder="length = 20&#10;basis = sma(close, length)&#10;plot(basis, &quot;均线&quot;)"></textarea>
+              <div class="row" style="gap:8px;justify-content:flex-start;padding-top:6px">
+                <button id="scCheck" style="flex:0 0 auto">检查</button>
+                <button class="primary" id="scSave" style="flex:0 0 auto">保存并加到图表</button>
+                <button id="scNew" style="flex:0 0 auto">新建</button>
+                <span id="scMsg" style="font-size:12px"></span>
+              </div>
+            </div>
+            <div>
+              <b>我的脚本</b>
+              <div id="scList"></div>
+              <details class="sc-help" open><summary>语法</summary>
+                <div>每行一条语句，<code>#</code> 或 <code>//</code> 后面是注释。</div>
+                <div><code>name = 表达式</code> 定义变量；<code>length = 20</code> 这种单独数字会变成可调参数（在“指标”菜单里改）。</div>
+                <div><code>plot(值, "标题", "#颜色", "line|histogram|dots|area")</code> 画线</div>
+                <div><code>hline(70, "超买")</code> 水平参考线</div>
+                <div><code>plotshape(条件, "标题", "up|down", "#颜色")</code> 在条件成立的 K 线上画箭头</div>
+                <div>函数和策略规则相同：<code>sma ema rsi atr stdev sum highest lowest crossover barssince valuewhen nz ref_close("SPY")</code> …；<code>close[1]</code> 取前一根；<code>a if 条件 else b</code>。</div>
+              </details>
+            </div>
+          </div>
+        </div>
+        <div id="chainView" hidden>
+          <div class="row" style="padding:8px 12px;gap:8px;justify-content:flex-start">
+            <select id="chExp" aria-label="到期日" style="flex:0 0 auto"></select>
+            <select id="chRange" aria-label="显示档位" style="flex:0 0 auto"><option value="8">平值附近 ±8 档</option><option value="15">±15 档</option><option value="999">全部</option></select>
+            <span class="muted" style="font-size:11px" id="chInfo"></span>
+          </div>
+          <div class="metrics" id="chStats"></div>
+          <div style="overflow:auto;padding:0 12px 12px"><table class="chain" id="chTable"></table></div>
+        </div>
+        <div id="calView" hidden>
+          <div class="row" style="padding:8px 12px;gap:8px;justify-content:flex-start;flex-wrap:wrap">
+            <button id="calPrev" style="flex:0 0 auto">‹ 上周</button>
+            <b id="calRange" style="flex:0 0 auto"></b>
+            <button id="calNext" style="flex:0 0 auto">下周 ›</button>
+            <button id="calToday" style="flex:0 0 auto">本周</button>
+            <div class="seg" role="group" aria-label="类型" style="flex:0 0 auto"><button id="calEcon" class="on">经济数据</button><button id="calEarn">财报</button></div>
+            <label style="flex:0 0 auto;display:flex;gap:4px;align-items:center"><input type="checkbox" id="calWatch"> 只看自选</label>
+          </div>
+          <div style="overflow:auto;padding:0 12px 12px"><table id="calTable"></table></div>
+          <p class="muted" style="font-size:11px;padding:0 12px 12px" id="calFoot"></p>
+        </div>
         <div id="fundView" hidden>
           <div class="fund-head" id="fundHead"></div>
           <div class="metrics" id="fundStats"></div>
           <div class="fund-grid">
             <div>
               <div class="row" style="justify-content:flex-start;gap:8px;padding:0 0 6px">
-                <b style="flex:0 0 auto">利润表</b>
+                <div class="seg" role="group" aria-label="报表" style="flex:0 0 auto"><button id="fsInc" class="on">利润表</button><button id="fsBal">资产负债表</button><button id="fsCf">现金流量表</button></div>
                 <div class="seg" role="group" aria-label="周期" style="flex:0 0 auto"><button id="fqBtn" class="on">季度</button><button id="faBtn">年度</button></div>
               </div>
               <div style="overflow:auto"><table id="fundStmt"></table></div>
@@ -603,10 +681,12 @@ function mainData(bars) {
 }
 
 function indicatorSpecs() {
-  return state.inds.map(i => `${i.id}=${i.args ? `${i.type}:${i.args}` : i.type}`);
+  return state.inds.map(i => i.type === "script" ? `${i.id}=script:${i.args}${i.inputs ? ":" + i.inputs.replace(/[,，\s]+/g, ";") : ""}`
+    : `${i.id}=${i.args ? `${i.type}:${i.args}` : i.type}`);
 }
 
 function seriesColor(s, idxInInstance) {
+  if (s.color) return s.color;
   if (s.tone === "up") return css("--up");
   if (s.tone === "down") return css("--down");
   const inst = state.inds.find(i => i.id === s.uid);
@@ -621,6 +701,7 @@ function sliceForReplay(data) {
   const cut = data.bars[Math.min(state.replay.idx, data.bars.length - 1)].time;
   return { ...data, bars: data.bars.filter(b => b.time <= cut),
            series: data.series.map(s => ({ ...s, data: s.data.filter(p => p.time <= cut) })),
+           shapes: (data.shapes || []).map(s => ({ ...s, data: s.data.filter(p => p.time <= cut) })),
            signals: (data.signals || []).filter(x => x.bar_ts <= cut) };
 }
 
@@ -632,7 +713,9 @@ async function loadChart({ keepRange = false } = {}) {
     const q = new URLSearchParams({ symbol: state.symbol, interval: state.interval, limit: 2000, indicators: indicatorSpecs().join(",") });
     data = await api("/api/chart?" + q);
   } catch (e) { $("chartMsg").textContent = "无法加载：" + e.message; return; }
-  $("chartMsg").textContent = "";
+  $("chartMsg").textContent = (data.script_errors || []).length ? "脚本错误：" + data.script_errors.join("；") : "";
+  data.shapes = data.series.filter(x => x.kind === "shape");
+  data.series = data.series.filter(x => x.kind !== "shape");
   fullData = data;
   await loadCompares();
   render({ keepRange });
@@ -694,14 +777,17 @@ function render({ keepRange = false } = {}) {
       const opts = { priceLineVisible: false, lastValueVisible: s.pane !== "price" && s.pane !== "volume" };
       if (s.pane === "volume") opts.priceScaleId = "vol";
       if (s.kind === "histogram") ser = chart.addSeries(LWC.HistogramSeries, opts, paneIndex[s.pane]);
+      else if (s.kind === "area") ser = chart.addSeries(LWC.AreaSeries, { ...opts, lineColor: color, lineWidth: 2,
+        topColor: color.length === 7 ? color + "55" : color, bottomColor: color.length === 7 ? color + "05" : color }, paneIndex[s.pane]);
       else if (s.kind === "dots") ser = chart.addSeries(LWC.LineSeries, { ...opts, color, lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 2 }, paneIndex[s.pane]);
       else ser = chart.addSeries(LWC.LineSeries, { ...opts, color, lineWidth: BAND_TYPES.some(t => s.id.includes(t)) ? 1 : 2, crosshairMarkerRadius: 3,
         lineType: s.group && s.group.startsWith("supertrend") ? LWC.LineType.WithSteps : LWC.LineType.Simple }, paneIndex[s.pane]);
       (s.levels || []).forEach(lv => ser.createPriceLine({ price: lv, color: css("--muted"), lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: false }));
       seriesMap.set(s.id, ser);
-      ser._meta = { name: s.name, color: s.kind === "histogram" ? css("--muted") : color, pane: s.pane };
+      ser._meta = { name: s.name, color: s.kind === "histogram" && !s.color ? css("--muted") : color, pane: s.pane };
     }
-    if (s.kind === "histogram") ser.setData(s.data.map(p => ({ ...p, color: p.value >= 0 ? css("--up") + "99" : css("--down") + "99" })));
+    if (s.kind === "histogram" && s.color) ser.setData(s.data.map(p => ({ ...p, color: s.color.length === 7 ? s.color + "aa" : s.color })));
+    else if (s.kind === "histogram") ser.setData(s.data.map(p => ({ ...p, color: p.value >= 0 ? css("--up") + "99" : css("--down") + "99" })));
     else ser.setData(s.data);
   }
   chart.panes().forEach((p, i) => p.setStretchFactor(i === 0 ? 3 : 1));
@@ -741,6 +827,11 @@ function applyMarkers() {
     marks = (lastData.signals || []).map(s => markerFor(s.action, nextBarTime(s.bar_ts), "信号"));
   }
   const times = new Set(lastData.bars.map(b => b.time));
+  for (const sh of lastData.shapes || []) {
+    const up = sh.direction !== "down";
+    const color = sh.color || css(up ? "--up" : "--down");
+    sh.data.forEach(p => marks.push({ time: p.time, position: up ? "belowBar" : "aboveBar", shape: up ? "arrowUp" : "arrowDown", color }));
+  }
   marks = marks.filter(m => times.has(m.time)).concat(eventMarkers());
   markersApi.setMarkers(marks.sort((a, b) => a.time - b.time));
 }
@@ -782,8 +873,20 @@ function renderIntervals() {
   $("intervals").querySelectorAll("button").forEach(b => b.onclick = () => { state.interval = b.dataset.iv; store.set("sp.interval", state.interval); exitReplay(false); renderIntervals(); loadChart(); });
 }
 function saveInds() { store.set("sp.inds", state.inds); }
+function newIndId() { return "i" + (Math.max(0, ...state.inds.map(i => +String(i.id).slice(1) || 0)) + 1); }
+function addScriptInd(sid) {
+  if (!state.inds.some(i => i.type === "script" && i.args === sid)) state.inds.push({ id: newIndId(), type: "script", args: sid, inputs: "" });
+  saveInds();
+}
 function renderIndMenu() {
   const rows = state.inds.map(i => {
+    if (i.type === "script") {
+      const sc = scripts.find(x => x.id === i.args);
+      const ph = sc ? Object.entries(sc.inputs || {}).map(([k, v]) => `${k}=${v}`).join(";") : "";
+      return `<div class="ind-row" data-id="${esc(i.id)}"><span title="自定义脚本">📝 ${esc(sc ? sc.name : "（已删除的脚本）")}</span>
+        ${ph ? `<input type="text" data-k="inputs" value="${esc(i.inputs || "")}" placeholder="${esc(ph)}" title="参数，如 ${esc(ph)}">` : "<span></span>"}
+        <span></span><button class="danger" data-k="del" title="移除" aria-label="移除">×</button></div>`;
+    }
     const [label, def] = IND_CATALOG[i.type] || [i.type, ""];
     const color = i.color || css((IND_CATALOG[i.type] || [])[2] || "--s1");
     return `<div class="ind-row" data-id="${esc(i.id)}"><span>${esc(label)}</span>
@@ -791,7 +894,8 @@ function renderIndMenu() {
       <input type="color" data-k="color" value="${esc(color.length === 7 ? color : "#3987e5")}" title="颜色">
       <button class="danger" data-k="del" title="移除" aria-label="移除 ${esc(label)}">×</button></div>`;
   }).join("") || '<div class="muted" style="padding:4px">图上还没有指标</div>';
-  const opts = Object.entries(IND_CATALOG).map(([k, [l]]) => `<option value="${k}">${esc(l)}</option>`).join("");
+  const opts = Object.entries(IND_CATALOG).map(([k, [l]]) => `<option value="${k}">${esc(l)}</option>`).join("")
+    + (scripts.length ? `<optgroup label="我的脚本">${scripts.map(x => `<option value="script:${esc(x.id)}">📝 ${esc(x.name)}</option>`).join("")}</optgroup>` : "");
   $("indMenu").innerHTML = `<div style="font-weight:600;margin-bottom:4px">图上的指标</div>${rows}
     <div class="row" style="margin-top:8px"><select id="indAdd">${opts}</select><button class="primary" id="indAddBtn" style="flex:0 0 auto">添加</button></div>
     <div class="muted" style="font-size:11px;padding:4px 0">同一个指标可以加多条，比如 EMA 20 / 50 / 200。参数用冒号分隔，如布林带 20:2。</div>`;
@@ -804,14 +908,18 @@ function renderIndMenu() {
   });
   $("indAddBtn").onclick = () => {
     const type = $("indAdd").value;
-    const n = Math.max(0, ...state.inds.map(i => +String(i.id).slice(1) || 0)) + 1;
-    state.inds.push({ id: "i" + n, type, args: IND_CATALOG[type][1], color: null });
-    saveInds(); renderIndMenu(); loadChart({ keepRange: true });
+    if (type.startsWith("script:")) addScriptInd(type.slice(7));
+    else { state.inds.push({ id: newIndId(), type, args: IND_CATALOG[type][1], color: null }); saveInds(); }
+    renderIndMenu(); loadChart({ keepRange: true });
   };
 }
 $("indBtn").onclick = (e) => { e.stopPropagation(); $("indMenu").classList.toggle("open"); };
 $("indMenu").addEventListener("click", (e) => e.stopPropagation());   // menu re-renders itself; keep it open
-document.addEventListener("click", (e) => { if (e.target !== $("indBtn")) $("indMenu").classList.remove("open"); });
+document.addEventListener("click", (e) => {
+  if (e.target !== $("indBtn")) $("indMenu").classList.remove("open");
+  if (e.target !== $("toolBtn")) $("toolMenu").classList.remove("open");
+});
+$("toolBtn").onclick = (e) => { e.stopPropagation(); $("indMenu").classList.remove("open"); $("toolMenu").classList.toggle("open"); };
 
 $("chartType").value = state.chartType;
 $("chartType").onchange = () => { state.chartType = $("chartType").value; store.set("sp.chartType", state.chartType); lastData = null; render(); };
@@ -952,7 +1060,7 @@ $("scrRun").onclick = runScreener;
 $("scrFilter").addEventListener("keydown", e => { if (e.key === "Enter") runScreener(); });
 
 // ---------------------------------------------------------------- fundamentals + corporate events
-let fundData = null, fundPeriod = "quarterly", showEvents = store.get("sp.events", true);
+let fundData = null, fundPeriod = "quarterly", fundStmtType = "income", showEvents = store.get("sp.events", true);
 const EVT = { earnings: ["E", "--s3"], dividend: ["D", "--up"], split: ["S", "--s4"] };
 function eventMarkers() {
   if (!showEvents || !fundData || fundData.symbol !== state.symbol || !lastData) return [];
@@ -1006,9 +1114,12 @@ function renderFundamentals() {
     const cls = s.key === "target_upside" || s.key.endsWith("growth") ? (s.value >= 0 ? "up" : "down") : "";
     return `<div class="metric"><span>${esc(s.label)}</span><b class="${cls}">${fmtStat(s)}</b></div>`;
   }).join("");
-  const st = d[fundPeriod] || { periods: [], rows: [] };
+  const st = (fundStmtType === "income" ? d[fundPeriod] : (d[fundStmtType] || {})[fundPeriod]) || { periods: [], rows: [] };
   $("fqBtn").classList.toggle("on", fundPeriod === "quarterly"); $("faBtn").classList.toggle("on", fundPeriod === "annual");
-  if (!st.periods.length) { $("fundStmt").innerHTML = '<tr><td class="muted">没有利润表数据</td></tr>'; $("fundBars").innerHTML = ""; }
+  [["fsInc", "income"], ["fsBal", "balance"], ["fsCf", "cashflow"]].forEach(([id, t]) => $(id).classList.toggle("on", fundStmtType === t));
+  const [k1, k2, l1, l2] = { income: ["revenue", "net_income", "营收", "净利润"], balance: ["total_assets", "total_liabilities", "总资产", "总负债"],
+    cashflow: ["operating_cf", "free_cf", "经营现金流", "自由现金流"] }[fundStmtType];
+  if (!st.periods.length) { $("fundStmt").innerHTML = '<tr><td class="muted">没有这张报表的数据</td></tr>'; $("fundBars").innerHTML = ""; }
   else {
     const label = (x) => fundPeriod === "annual" ? x.slice(0, 4) : x.slice(0, 7);
     const growth = (vals, i) => {
@@ -1017,13 +1128,13 @@ function renderFundamentals() {
       return a != null && b ? `<div class="${a >= b ? "up" : "down"}" style="font-size:10px">${((a / Math.abs(b) - 1) * 100).toFixed(1)}%</div>` : "";
     };
     $("fundStmt").innerHTML = `<thead><tr><th></th>${st.periods.map(x => `<th class="num">${label(x)}</th>`).join("")}</tr></thead><tbody>` +
-      st.rows.map(r => `<tr><td>${esc(r.label)}</td>${r.values.map((v, i) => `<td class="num">${r.key === "eps" ? fmt(v, 2) : r.key === "net_margin" ? (v == null ? "—" : v.toFixed(1) + "%") : fmtMoney(v)}${["revenue", "net_income", "eps"].includes(r.key) ? growth(r.values, i) : ""}</td>`).join("")}</tr>`).join("") + "</tbody>";
-    const rev = (st.rows.find(r => r.key === "revenue") || {}).values || [];
-    const ni = (st.rows.find(r => r.key === "net_income") || {}).values || [];
+      st.rows.map(r => `<tr><td>${esc(r.label)}</td>${r.values.map((v, i) => `<td class="num">${r.key === "eps" ? fmt(v, 2) : r.key === "net_margin" ? (v == null ? "—" : v.toFixed(1) + "%") : fmtMoney(v)}${["revenue", "net_income", "eps", "operating_cf", "free_cf", "equity"].includes(r.key) ? growth(r.values, i) : ""}</td>`).join("")}</tr>`).join("") + "</tbody>";
+    const rev = (st.rows.find(r => r.key === k1) || {}).values || [];
+    const ni = (st.rows.find(r => r.key === k2) || {}).values || [];
     const max = Math.max(1, ...rev.map(v => Math.abs(v || 0)), ...ni.map(v => Math.abs(v || 0)));
     $("fundBars").innerHTML = st.periods.map((x, i) => `<div class="col"><div class="pair">
-      <div class="bar" title="营收 ${fmtMoney(rev[i])}" style="height:${Math.abs(rev[i] || 0) / max * 100}%;background:${css("--s1")}"></div>
-      <div class="bar" title="净利润 ${fmtMoney(ni[i])}" style="height:${Math.abs(ni[i] || 0) / max * 100}%;background:${css((ni[i] || 0) >= 0 ? "--up" : "--down")}"></div>
+      <div class="bar" title="${l1} ${fmtMoney(rev[i])}" style="height:${Math.abs(rev[i] || 0) / max * 100}%;background:${css("--s1")}"></div>
+      <div class="bar" title="${l2} ${fmtMoney(ni[i])}" style="height:${Math.abs(ni[i] || 0) / max * 100}%;background:${css((ni[i] || 0) >= 0 ? "--up" : "--down")}"></div>
     </div>${label(x)}</div>`).join("");
   }
   const earn = (d.events || []).filter(e => e.type === "earnings").slice().reverse();
@@ -1042,9 +1153,163 @@ $("fundBtn").onclick = async () => {
 };
 $("fqBtn").onclick = () => { fundPeriod = "quarterly"; renderFundamentals(); };
 $("faBtn").onclick = () => { fundPeriod = "annual"; renderFundamentals(); };
+$("fsInc").onclick = () => { fundStmtType = "income"; renderFundamentals(); };
+$("fsBal").onclick = () => { fundStmtType = "balance"; renderFundamentals(); };
+$("fsCf").onclick = () => { fundStmtType = "cashflow"; renderFundamentals(); };
 function renderEvtBtn() { $("evtBtn").classList.toggle("on", showEvents); }
 $("evtBtn").onclick = () => { showEvents = !showEvents; store.set("sp.events", showEvents); renderEvtBtn(); if (showEvents) loadFundamentals(); applyMarkers(); };
 renderEvtBtn();
+
+// ---------------------------------------------------------------- indicator scripts (Pine-like)
+let scripts = [], scriptExamples = {}, editingScript = null;
+async function loadScripts() {
+  try { const r = await api("/api/scripts"); scripts = r.scripts; scriptExamples = r.examples; } catch (e) { scripts = []; }
+  renderIndMenu(); renderScriptList();
+  $("scExample").innerHTML = '<option value="">载入示例…</option>' + Object.keys(scriptExamples).map(k => `<option>${esc(k)}</option>`).join("");
+}
+function renderScriptList() {
+  $("scList").innerHTML = scripts.length ? scripts.map(x => `<div class="sc-item" data-id="${esc(x.id)}"><span title="${esc(x.name)}">${esc(x.name)}${x.overlay ? "" : ' <span class="muted" style="font-size:11px">副图</span>'}</span>
+    <button data-a="edit">编辑</button><button data-a="add">加到图表</button><button class="danger" data-a="del" aria-label="删除">×</button></div>`).join("")
+    : '<p class="muted" style="font-size:12px">还没有脚本。左边写好后点“保存并加到图表”。</p>';
+  $("scList").querySelectorAll(".sc-item").forEach(row => row.querySelectorAll("button").forEach(b => b.onclick = async () => {
+    const sc = scripts.find(x => x.id === row.dataset.id);
+    if (b.dataset.a === "edit") editScript(sc);
+    else if (b.dataset.a === "add") { addScriptInd(sc.id); renderIndMenu(); lastData = null; loadChart(); }
+    else if (confirm(`删除脚本「${sc.name}」？`)) {
+      try { await api("/api/scripts/" + sc.id, { method: "DELETE" }); } catch (e) { alert(e.message); return; }
+      state.inds = state.inds.filter(i => !(i.type === "script" && i.args === sc.id)); saveInds();
+      if (editingScript === sc.id) editScript(null);
+      await loadScripts(); lastData = null; loadChart();
+    }
+  }));
+}
+function editScript(sc) {
+  editingScript = sc ? sc.id : null;
+  $("scName").value = sc ? sc.name : ""; $("scOverlay").checked = sc ? !!sc.overlay : true;
+  $("scSource").value = sc ? sc.source : ""; scMsg("");
+}
+function scMsg(text, ok) { $("scMsg").textContent = text; $("scMsg").className = ok === undefined ? "muted" : ok ? "up" : "down"; }
+$("scriptBtn").onclick = () => {
+  showBottom("scriptView"); $("btTitle").textContent = "指标脚本"; $("btSub").textContent = "类 Pine Script";
+  if (!$("scSource").value && !editingScript) { const k = Object.keys(scriptExamples)[0]; if (k) { $("scSource").value = scriptExamples[k]; $("scName").value = k; $("scOverlay").checked = true; } }
+};
+$("scExample").onchange = () => {
+  const k = $("scExample").value; if (!k) return;
+  editingScript = null; $("scName").value = k; $("scSource").value = scriptExamples[k];
+  $("scOverlay").checked = !k.includes("副图"); $("scExample").value = ""; scMsg("");
+};
+$("scNew").onclick = () => editScript(null);
+$("scCheck").onclick = async () => {
+  const r = await api("/api/scripts/validate", { method: "POST", body: JSON.stringify({ source: $("scSource").value }) });
+  const ins = Object.entries(r.inputs || {}).map(([k, v]) => `${k}=${v}`).join("，");
+  scMsg(r.ok ? "✓ 没有问题" + (ins ? `；参数：${ins}` : "") : r.errors.join("；"), r.ok);
+};
+$("scSource").addEventListener("keydown", (e) => {
+  if (e.key === "Tab") { e.preventDefault(); const t = e.target, a = t.selectionStart; t.setRangeText("    ", a, t.selectionEnd, "end"); }
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") $("scSave").click();
+});
+$("scSave").onclick = async () => {
+  let item;
+  try {
+    item = await api("/api/scripts", { method: "POST", body: JSON.stringify({ id: editingScript, name: $("scName").value,
+      overlay: $("scOverlay").checked, source: $("scSource").value }) });
+  } catch (e) { scMsg(e.message, false); return; }
+  editingScript = item.id;
+  addScriptInd(item.id);
+  await loadScripts();
+  scMsg("✓ 已保存并加到图表（Ctrl+Enter 也可保存）", true);
+  lastData = null; loadChart({ keepRange: true });
+};
+
+// ---------------------------------------------------------------- option chain
+let chainData = null;
+async function loadChain(expiry) {
+  $("chInfo").textContent = "加载中…";
+  try { chainData = await api("/api/options?" + new URLSearchParams({ symbol: state.symbol, ...(expiry ? { expiry } : {}) })); }
+  catch (e) { chainData = null; $("chInfo").textContent = e.message; $("chTable").innerHTML = ""; $("chStats").innerHTML = ""; return; }
+  renderChain();
+}
+function renderChain() {
+  const d = chainData; if (!d) return;
+  $("chExp").innerHTML = d.expirations.map(x => {
+    const days = Math.round((new Date(x + "T20:00:00Z") - Date.now()) / 864e5);
+    return `<option value="${x}" ${x === d.expiry ? "selected" : ""}>${x}（${Math.max(days, 0)} 天）</option>`;
+  }).join("");
+  const sm = d.summary;
+  const m = (l, v, cls = "") => `<div class="metric"><span>${l}</span><b class="${cls}">${v}</b></div>`;
+  $("chStats").innerHTML = m("标的价格", fmt(d.spot)) + m("最大痛点", fmt(sm.max_pain)) + m("平值隐含波动率", sm.atm_iv == null ? "—" : (sm.atm_iv * 100).toFixed(1) + "%")
+    + m("Put/Call 成交量比", fmt(sm.pc_volume), sm.pc_volume > 1 ? "down" : "up") + m("Put/Call 持仓比", fmt(sm.pc_oi), sm.pc_oi > 1 ? "down" : "up")
+    + m("认购成交 / 持仓", `${fmtVol(sm.call_volume)} / ${fmtVol(sm.call_oi)}`) + m("认沽成交 / 持仓", `${fmtVol(sm.put_volume)} / ${fmtVol(sm.put_oi)}`);
+  const n = +$("chRange").value;
+  const puts = new Map(d.puts.map(r => [r.strike, r])), calls = new Map(d.calls.map(r => [r.strike, r]));
+  let strikes = [...new Set([...calls.keys(), ...puts.keys()])].sort((a, b) => a - b);
+  const atmIdx = d.spot ? strikes.reduce((bi, k, i) => Math.abs(k - d.spot) < Math.abs(strikes[bi] - d.spot) ? i : bi, 0) : Math.floor(strikes.length / 2);
+  strikes = strikes.slice(Math.max(0, atmIdx - n), atmIdx + n + 1);
+  const firstAbove = strikes.findIndex(k => d.spot != null && k >= d.spot);
+  const iv = (v) => v == null ? "—" : (v * 100).toFixed(1) + "%";
+  const side = (r, itm, cols) => cols.map(c => `<td class="num${itm ? " itm" : ""}">${!r ? "" : c === "iv" ? iv(r.iv) : c === "volume" || c === "oi" ? fmtVol(r[c]) : c === "change_pct" ? pctHtml(r[c]) : fmt(r[c])}</td>`).join("");
+  const CC = ["oi", "volume", "iv", "change_pct", "bid", "ask", "last"], PC = ["last", "bid", "ask", "change_pct", "iv", "volume", "oi"];
+  const L = { oi: "持仓", volume: "成交", iv: "IV", change_pct: "涨跌", bid: "买价", ask: "卖价", last: "最新" };
+  $("chTable").innerHTML = `<thead><tr><th class="ch-side" colspan="7">认购 Calls</th><th></th><th class="ch-side" colspan="7">认沽 Puts</th></tr>
+    <tr>${CC.map(c => `<th class="num">${L[c]}</th>`).join("")}<th style="text-align:center">行权价</th>${PC.map(c => `<th class="num">${L[c]}</th>`).join("")}</tr></thead><tbody>` +
+    strikes.map((k, i) => { const c = calls.get(k), p = puts.get(k);
+      return `<tr class="${i === firstAbove ? "atm" : ""}">${side(c, c && c.itm, CC)}<td class="strike">${fmt(k)}</td>${side(p, p && p.itm, PC)}</tr>`; }).join("") + "</tbody>";
+  $("chInfo").textContent = `${d.symbol} · 数据来源 Yahoo Finance（延迟），缓存 15 分钟 · ${d.fetched_at}`;
+}
+$("chainBtn").onclick = () => { showBottom("chainView"); $("btTitle").textContent = "期权链"; $("btSub").textContent = state.symbol;
+  if (!chainData || chainData.symbol !== state.symbol) loadChain(); };
+$("chExp").onchange = () => loadChain($("chExp").value);
+$("chRange").onchange = renderChain;
+
+// ---------------------------------------------------------------- economic / earnings calendar
+let calStart = null, calType = "econ", calData = null;
+const isoDay = (d) => d.toISOString().slice(0, 10);
+function weekStart(d = new Date()) { const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7)); return x; }
+async function loadCalendar() {
+  calStart = calStart || weekStart();
+  const end = new Date(calStart); end.setUTCDate(end.getUTCDate() + 6);
+  $("calRange").textContent = `${isoDay(calStart)} ~ ${isoDay(end)}`;
+  $("calTable").innerHTML = '<tr><td class="muted">加载中…</td></tr>';
+  try { calData = await api("/api/calendar?" + new URLSearchParams({ start: isoDay(calStart), days: 7 })); }
+  catch (e) { calData = null; $("calTable").innerHTML = `<tr><td class="muted">${esc(e.message)}</td></tr>`; return; }
+  renderCalendar();
+}
+function renderCalendar() {
+  if (!calData) return;
+  $("calEcon").classList.toggle("on", calType === "econ"); $("calEarn").classList.toggle("on", calType === "earn");
+  $("calWatch").parentElement.style.display = calType === "earn" ? "" : "none";
+  const dayKey = (t) => new Date(t * 1000).toLocaleDateString(undefined, { month: "2-digit", day: "2-digit", weekday: "short" });
+  const tm = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  let rows = calType === "econ" ? calData.economic : calData.earnings.filter(e => !$("calWatch").checked || e.watched);
+  const head = calType === "econ"
+    ? "<tr><th>时间</th><th>地区</th><th>事件</th><th class=\"num\">实际</th><th class=\"num\">预期</th><th class=\"num\">前值</th></tr>"
+    : "<tr><th>时段</th><th>代码</th><th>公司</th><th class=\"num\">市值</th><th class=\"num\">预期 EPS</th><th class=\"num\">实际 EPS</th><th class=\"num\">超预期</th></tr>";
+  const cols = calType === "econ" ? 6 : 7;
+  let last = "", body = "";
+  for (const e of rows) {
+    const k = dayKey(e.time);
+    if (k !== last) { body += `<tr class="cal-day"><td colspan="${cols}">${esc(k)}</td></tr>`; last = k; }
+    if (calType === "econ") {
+      const beat = e.actual != null && e.expected != null ? (e.actual >= e.expected ? "up" : "down") : "";
+      body += `<tr><td>${tm(e.time)}</td><td>${esc(e.region || "")}</td><td>${esc(e.event)}${e.period ? ` <span class="muted">${esc(e.period)}</span>` : ""}</td>
+        <td class="num ${beat}">${fmt(e.actual)}</td><td class="num">${fmt(e.expected)}</td><td class="num">${fmt(e.last)}</td></tr>`;
+    } else {
+      const timing = { BMO: "盘前", AMC: "盘后", TNS: "未定", TAS: "未定" }[e.timing] || e.timing || "";
+      body += `<tr class="click${e.watched ? " watched" : ""}" data-s="${esc(e.symbol)}"><td>${esc(timing)}</td><td><b>${esc(e.symbol)}</b></td><td>${esc(e.company || "")}</td>
+        <td class="num">${fmtMoney(e.market_cap)}</td><td class="num">${fmt(e.estimate)}</td><td class="num">${fmt(e.actual)}</td><td class="num">${e.surprise_pct == null ? "—" : pctHtml(e.surprise_pct)}</td></tr>`;
+    }
+  }
+  $("calTable").innerHTML = `<thead>${head}</thead><tbody>${body || `<tr><td colspan="${cols}" class="muted">这一周没有数据</td></tr>`}</tbody>`;
+  $("calTable").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => setSymbol(tr.dataset.s));
+  $("calFoot").textContent = `数据来源 Yahoo Finance，缓存 3 小时；时间为本地时区。财报只列市值 20 亿美元以上的公司，自选股高亮。${(calData.errors || []).join("；")}`;
+}
+const shiftWeek = (n) => { calStart = calStart || weekStart(); calStart = new Date(calStart); calStart.setUTCDate(calStart.getUTCDate() + 7 * n); loadCalendar(); };
+$("calBtn").onclick = () => { showBottom("calView"); $("btTitle").textContent = "财经日历"; $("btSub").textContent = ""; if (!calData) loadCalendar(); };
+$("calPrev").onclick = () => shiftWeek(-1); $("calNext").onclick = () => shiftWeek(1);
+$("calToday").onclick = () => { calStart = null; loadCalendar(); };
+$("calEcon").onclick = () => { calType = "econ"; renderCalendar(); };
+$("calEarn").onclick = () => { calType = "earn"; renderCalendar(); };
+$("calWatch").onchange = renderCalendar;
 
 function setSymbol(sym, interval) {
   sym = (sym || "").trim().toUpperCase();
@@ -1057,6 +1322,7 @@ function setSymbol(sym, interval) {
   lastData = null;
   loadChart().then(() => {
     if (!$("fundView").hidden) $("fundBtn").click();
+    else if (!$("chainView").hidden) $("chainBtn").click();
     else if (showEvents) loadFundamentals();
   });
   renderWatch();
@@ -1234,7 +1500,7 @@ function renderBacktest(bt, name) {
 
 function showBottom(view) {
   $("bottom").classList.add("open");
-  ["btView", "scanView", "optView", "tableView", "screenView", "fundView"].forEach(v => $(v).hidden = v !== view);
+  ["btView", "scanView", "optView", "tableView", "screenView", "fundView", "scriptView", "chainView", "calView"].forEach(v => $(v).hidden = v !== view);
 }
 
 // ---------------------------------------------------------------- optimizer
@@ -1539,6 +1805,7 @@ renderIntervals(); renderIndMenu(); renderScaleBtns();
 loadChart().then(() => { if (showEvents) loadFundamentals(); }); loadWatch();
 loadMeta().then(() => { configToForm(store.get("sp.draft", { name: "", interval: state.interval, symbols: [state.symbol] })); }).catch(() => {});
 loadStrategies().catch(() => {});
+loadScripts();
 const tab = store.get("sp.tab", "watch"); const tb = document.querySelector(`.tabs button[data-tab="${tab}"]`); if (tb) tb.click();
 
 // Live updates: chart every 30s (the server throttles provider pulls); watchlist every minute.
