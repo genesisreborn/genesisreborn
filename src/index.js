@@ -5,6 +5,7 @@ import { sendMessage, answerCallback } from './telegram.js';
 const allowed = (env, chatId) => !env.ALLOWED_CHAT_ID || String(chatId) === String(env.ALLOWED_CHAT_ID);
 
 async function handleUpdate(env, update) {
+  const appUrl = env.APP_URL;
   const cb = update.callback_query;
   if (cb) {
     const chatId = cb.message?.chat.id;
@@ -23,6 +24,12 @@ async function handleUpdate(env, update) {
     await sendMessage(env, msg.chat.id, `This bot is private. Your chat id is <code>${msg.chat.id}</code>.`);
     return;
   }
+  if (/^\/(app|dashboard)(@\w+)?$/i.test(msg.text.trim()) && appUrl) {
+    await sendMessage(env, msg.chat.id, 'Open your dashboard 👇', {
+      reply_markup: { inline_keyboard: [[{ text: '📊 Open dashboard', web_app: { url: appUrl } }]] },
+    });
+    return;
+  }
   await sendMessage(env, msg.chat.id, await handleText(env, msg.chat.id, msg.text));
 }
 
@@ -34,7 +41,7 @@ export default {
         return new Response('forbidden', { status: 403 });
       }
       const update = await request.json();
-      ctx.waitUntil(handleUpdate(env, update).catch((e) => console.error('update failed', e)));
+      ctx.waitUntil(handleUpdate({ ...env, APP_URL: env.APP_URL ?? url.origin }, update).catch((e) => console.error('update failed', e)));
       return new Response('ok');
     }
     if (url.pathname.startsWith('/api/')) return handleApi(request, env);

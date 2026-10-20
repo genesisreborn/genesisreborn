@@ -11,6 +11,7 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icon.png">
 <title>Installments</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{
   color-scheme:light;
@@ -155,7 +156,7 @@ tr+tr td{border-top:1px solid var(--line)}
   <nav class="tabs">
     <button id="t-loans" onclick="tab('loans')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M2.5 10h19M6 15h4"/></svg>Loans</button>
     <button id="t-spend" onclick="tab('spend')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Spending</button>
-    <button onclick="logout()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 018 0v2.5"/></svg>Lock</button>
+    <button id="t-lock" onclick="logout()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 018 0v2.5"/></svg>Lock</button>
   </nav>
 </div>
 <div id="sheet" class="sheet hidden" onclick="if(event.target===this)closeSheet()"><div id="sheetBody"></div></div>
@@ -166,6 +167,8 @@ let S=null,TAB='loans',SEL=null;const KEY='inst_pass';
 const CATS=['var(--s1)','var(--s2)','var(--s3)','var(--s4)','var(--s5)','var(--s6)','var(--s7)','var(--s8)'];
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const TG=window.Telegram&&window.Telegram.WebApp,INIT=(TG&&TG.initData)||'';
+if(INIT){try{TG.ready();TG.expand();TG.setHeaderColor('#184f95');TG.setBackgroundColor(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()||'#f1f1ee')}catch(e){}}
 const tok=()=>{try{return localStorage.getItem(KEY)||''}catch(e){return ''}};
 const num=c=>(c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const m=c=>S.currency+num(c);
@@ -176,15 +179,15 @@ const fmtDate=s=>{const [y,mo,d]=s.split('-');return `${+d} ${MONTHS[+mo-1]}`};
 const fmtDateY=s=>`${fmtDate(s)} ${s.slice(0,4)}`;
 
 async function call(path,body){
-  const r=await fetch(path,{method:body?'POST':'GET',headers:{authorization:'Bearer '+tok(),'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
-  if(r.status===401){logout();throw new Error('unauthorized')}
+  const r=await fetch(path,{method:body?'POST':'GET',headers:Object.assign({'content-type':'application/json'},INIT?{'x-telegram-init-data':INIT}:{authorization:'Bearer '+tok()}),body:body?JSON.stringify(body):undefined});
+  if(r.status===401){if(!INIT)logout();throw new Error('unauthorized')}
   const j=await r.json();if(!r.ok&&!j.state)throw new Error(j.error||'error');return j}
 async function login(){
   try{localStorage.setItem(KEY,$('pass').value)}catch(e){}
   try{S=await call('/api/state');start()}catch(e){$('loginErr').textContent='Wrong passcode or server not configured.'}}
 function logout(){try{localStorage.removeItem(KEY)}catch(e){}$('app').classList.add('hidden');$('login').classList.remove('hidden')}
-async function boot(){if(!tok())return logout();try{S=await call('/api/state');start()}catch(e){}}
-function start(){$('login').classList.add('hidden');$('app').classList.remove('hidden');render()}
+async function boot(){if(!INIT&&!tok())return logout();try{S=await call('/api/state');start()}catch(e){if(INIT)document.body.innerHTML='<div style="padding:30px;font:16px system-ui">Not authorised. Make sure ALLOWED_CHAT_ID matches your Telegram account.</div>'}}
+function start(){if(INIT)$('t-lock').classList.add('hidden');$('login').classList.add('hidden');$('app').classList.remove('hidden');render()}
 function tab(t){TAB=t;window.scrollTo(0,0);render()}
 function toast(t){const d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2200)}
 async function act(path,body,confirmMsg){

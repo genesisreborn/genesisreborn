@@ -52,5 +52,17 @@ schedule, one-tap "Mark paid", expense entry, category breakdown and budget.
 
 The passcode is stored only on your phone; use a long one (e.g. `openssl rand -base64 24`).
 
+## Open it inside Telegram (Mini App)
+The dashboard also runs as a Telegram Mini App, hosted on the same Worker — no extra hosting, and no passcode
+(Telegram's signed login data is verified against your `BOT_TOKEN` and `ALLOWED_CHAT_ID`).
+- Send `/app` to the bot → tap **Open dashboard**.
+- Optional: add a permanent button next to the message box:
+  ```
+  curl "https://api.telegram.org/bot<BOT_TOKEN>/setChatMenuButton" \
+    -H 'content-type: application/json' \
+    -d '{"menu_button":{"type":"web_app","text":"Dashboard","web_app":{"url":"https://installment-bot.<you>.workers.dev/"}}}'
+  ```
+  (Or in @BotFather: `/mybots` → your bot → Bot Settings → Menu Button.)
+
 ## Develop
 `npm test` runs the loan-maths and bot tests (Node 22+, no network needed).

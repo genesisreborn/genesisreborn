@@ -3,13 +3,38 @@ import { handleText, localToday, scheduleOf } from './bot.js';
 
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } });
 
-function authed(request, env) {
-  const given = (request.headers.get('authorization') ?? '').replace(/^Bearer /, '');
-  const want = env.APP_PASSCODE ?? '';
-  if (!want || given.length !== want.length) return false;
+const enc = new TextEncoder();
+async function hmac(key, data) {
+  const k = await crypto.subtle.importKey('raw', typeof key === 'string' ? enc.encode(key) : key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', k, enc.encode(data)));
+}
+const hex = (u8) => [...u8].map((b) => b.toString(16).padStart(2, '0')).join('');
+const safeEq = (a, b) => {
+  if (a.length !== b.length) return false;
   let diff = 0;
-  for (let i = 0; i < want.length; i++) diff |= given.charCodeAt(i) ^ want.charCodeAt(i);
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+};
+
+/** Validates Telegram Mini App initData (https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app). */
+export async function validInitData(initData, botToken, allowedId, now = Date.now()) {
+  if (!initData || !botToken || !allowedId) return false;
+  const p = new URLSearchParams(initData);
+  const hash = p.get('hash');
+  if (!hash) return false;
+  p.delete('hash');
+  const check = [...p.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n');
+  const sig = hex(await hmac(await hmac('WebAppData', botToken), check));
+  if (!safeEq(sig, hash)) return false;
+  if (now / 1000 - Number(p.get('auth_date')) > 86400) return false;
+  try { return String(JSON.parse(p.get('user')).id) === String(allowedId); } catch { return false; }
+}
+
+async function authed(request, env) {
+  const init = request.headers.get('x-telegram-init-data');
+  if (init) return validInitData(init, env.BOT_TOKEN, env.ALLOWED_CHAT_ID);
+  const given = (request.headers.get('authorization') ?? '').replace(/^Bearer /, '');
+  return !!env.APP_PASSCODE && safeEq(given, env.APP_PASSCODE);
 }
 
 async function state(env, chatId) {
@@ -60,7 +85,7 @@ async function state(env, chatId) {
 }
 
 export async function handleApi(request, env) {
-  if (!authed(request, env)) return json({ error: 'unauthorized' }, 401);
+  if (!(await authed(request, env))) return json({ error: 'unauthorized' }, 401);
   const chatId = Number(env.ALLOWED_CHAT_ID);
   if (!chatId) return json({ error: 'ALLOWED_CHAT_ID secret is not set' }, 500);
   const { pathname } = new URL(request.url);

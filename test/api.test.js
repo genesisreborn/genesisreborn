@@ -24,3 +24,30 @@ test('add loan, pay, expense through the API', async () => {
   const bad = await handleApi(req('/api/loan', { name: 'x', amount: 'abc' }), e);
   assert.equal(bad.status, 400);
 });
+
+import { createHmac } from 'node:crypto';
+import { validInitData } from '../src/api.js';
+
+function signInit(token, user, authDate = Math.floor(Date.now() / 1000)) {
+  const p = new URLSearchParams({ auth_date: String(authDate), query_id: 'AAA', user: JSON.stringify(user) });
+  const check = [...p.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n');
+  const secret = createHmac('sha256', 'WebAppData').update(token).digest();
+  p.set('hash', createHmac('sha256', secret).update(check).digest('hex'));
+  return p.toString();
+}
+
+test('Telegram initData validation', async () => {
+  const good = signInit('123:TOKEN', { id: 7, first_name: 'A' });
+  assert.equal(await validInitData(good, '123:TOKEN', '7'), true);
+  assert.equal(await validInitData(good, '123:TOKEN', '8'), false, 'other user');
+  assert.equal(await validInitData(good, '999:OTHER', '7'), false, 'wrong bot');
+  assert.equal(await validInitData(good + 'x', '123:TOKEN', '7'), false, 'tampered');
+  const old = signInit('123:TOKEN', { id: 7 }, Math.floor(Date.now() / 1000) - 90000);
+  assert.equal(await validInitData(old, '123:TOKEN', '7'), false, 'expired');
+});
+
+test('API accepts valid initData header', async () => {
+  const e = { ...env(), BOT_TOKEN: '123:TOKEN' };
+  const r = new Request('http://x/api/state', { headers: { 'x-telegram-init-data': signInit('123:TOKEN', { id: 7 }) } });
+  assert.equal((await handleApi(r, e)).status, 200);
+});

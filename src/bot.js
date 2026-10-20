@@ -52,6 +52,8 @@ Just type: <code>12.5 lunch</code> or <code>45 transport grab to office</code>
 /today · /month · /undo
 /budget &lt;amount&gt; — monthly spending limit (loan installments counted separately)
 
+/app — open the dashboard inside Telegram
+
 I remind you 3 days before, 1 day before, on the due day, and daily when overdue.`;
 
 async function addLoan(env, chatId, args) {
