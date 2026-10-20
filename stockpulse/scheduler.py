@@ -18,12 +18,14 @@ from .config import Settings
 from .db import Database
 from .pipeline import run_cycle
 from .report import generate_report
+from .brief import build_brief
 from .broker import BrokerExecutor
+from .portfolio import Portfolio
 from .realtime import RealtimeMonitor
 from .strategy.alerts import AlertEngine
 from .strategy.paper import PaperAccount
 from .strategy.signals import SignalEngine
-from .telegram_bot import TelegramNotifier
+from .telegram_bot import TelegramNotifier, format_portfolio
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +42,9 @@ class Engine:
         self.paper = PaperAccount(self.db, self.signals.store, settings)
         self.broker = BrokerExecutor(self.db, settings)
         self.realtime = RealtimeMonitor(self.db, settings, on_fire=self._realtime_fired)
+        self.portfolio = Portfolio(self.db, self.signals.store)
+        self.notifier.brief_fn = lambda: self.brief()["text"]
+        self.notifier.portfolio_fn = lambda: format_portfolio(self.portfolio.summary(history=False))
         self.scheduler = BackgroundScheduler(timezone=settings.timezone)
 
     def refresh(self) -> dict:
@@ -61,6 +66,19 @@ class Engine:
             n = self.notifier.send_report(snap)
             log.info("report #%s sent to %d chat(s)", snap["report_id"], n)
         return snap
+
+    def brief(self, update: bool = True) -> dict:
+        return build_brief(self.db, self.settings, self.signals.store, self.portfolio, update=update)
+
+    def _scheduled_brief(self) -> None:
+        try:
+            if self.settings.telegram_enabled:
+                if not self.settings.telegram_chat_ids:
+                    log.info("brief skipped: set TELEGRAM_CHAT_IDS (it contains your holdings)")
+                    return
+                self.notifier.send_private(self.brief()["text"])
+        except Exception:  # noqa: BLE001 - keep the scheduler alive
+            log.exception("scheduled brief failed")
 
     def _scheduled_report(self) -> None:
         try:
@@ -121,6 +139,11 @@ class Engine:
 
     def start(self) -> None:
         s = self.settings
+        for hhmm in s.brief_times:
+            h, m = (int(x) for x in hhmm.split(":"))
+            self.scheduler.add_job(self._scheduled_brief, CronTrigger(day_of_week="mon-fri", hour=h, minute=m,
+                                                                      timezone=s.timezone),
+                                   id=f"brief-{hhmm}", max_instances=1, coalesce=True)
         self.scheduler.add_job(self._safe_refresh, "interval", minutes=s.refresh_minutes, id="refresh",
                                next_run_time=datetime.now(ZoneInfo(s.timezone)) + timedelta(seconds=2),
                                max_instances=1, coalesce=True)

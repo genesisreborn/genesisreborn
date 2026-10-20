@@ -42,6 +42,10 @@ def create_app(settings: Settings | None = None, start_scheduler: bool = True) -
     def chart_page():
         return FileResponse(STATIC / "chart.html")
 
+    @app.get("/market")
+    def market_page():
+        return FileResponse(STATIC / "market.html")
+
     @app.get("/multi")
     def multi_page():
         return FileResponse(STATIC / "multi.html")

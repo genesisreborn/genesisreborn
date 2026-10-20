@@ -34,6 +34,8 @@ class Settings:
     timezone: str = field(default_factory=lambda: os.getenv("TIMEZONE", "Asia/Shanghai"))
     refresh_minutes: int = field(default_factory=lambda: int(os.getenv("REFRESH_MINUTES", "15")))
     daily_report_times: list[str] = field(default_factory=lambda: _list("DAILY_REPORT_TIMES", "08:30,21:00"))
+    # weekday pre-market brief (portfolio, movers, today's earnings / macro data) to the Telegram owners; empty = off
+    brief_times: list[str] = field(default_factory=lambda: _list("BRIEF_TIMES", "20:45"))
     alert_top_n: int = field(default_factory=lambda: int(os.getenv("ALERT_TOP_N", "5")))
     alert_min_score: float = field(default_factory=lambda: float(os.getenv("ALERT_MIN_SCORE", "70")))
 

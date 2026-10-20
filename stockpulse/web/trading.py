@@ -18,7 +18,9 @@ from .. import indicators as ind
 from ..db import utcnow
 from ..calendar_data import get_calendar
 from ..fundamentals import get_fundamentals
+from ..market_overview import market_overview
 from ..options import get_chain
+from ..portfolio import PortfolioError
 from ..market_data import INTERVALS, closed_bars
 from ..strategy import StrategyConfig
 from ..strategy.backtest import run_backtest
@@ -295,6 +297,62 @@ def build_router(engine, require_token: Callable[..., None]) -> APIRouter:
         with scripts_lock:
             db.set_kv("scripts", json.dumps([x for x in get_scripts() if x["id"] != sid], ensure_ascii=False))
         return {"deleted": sid}
+
+    # ---------------------------------------------------------------- portfolio (real holdings) + journal
+    @r.get("/portfolio")
+    def portfolio(history: bool = True, _=require_token):
+        try:
+            return engine.portfolio.summary(history=history)
+        except PortfolioError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @r.get("/portfolio/tx")
+    def portfolio_tx(symbol: str | None = None, _=require_token):
+        return engine.portfolio.transactions(symbol)
+
+    @r.post("/portfolio/tx")
+    @bad_input_is_400
+    def add_portfolio_tx(body: dict[str, Any] = Body(...), _=require_token):
+        try:
+            return engine.portfolio.add(body.get("symbol"), body.get("side"), body.get("qty") or 0, body.get("price"),
+                                        body.get("ts"), body.get("fee") or 0, str(body.get("note") or ""),
+                                        str(body.get("tags") or ""))
+        except PortfolioError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @r.put("/portfolio/tx/{tx_id}")
+    @bad_input_is_400
+    def edit_portfolio_note(tx_id: int, body: dict[str, Any] = Body(...), _=require_token):
+        if not engine.portfolio.update_note(tx_id, str(body.get("note") or ""), str(body.get("tags") or "")):
+            raise HTTPException(404, "交易记录不存在")
+        return {"updated": tx_id}
+
+    @r.delete("/portfolio/tx/{tx_id}")
+    def delete_portfolio_tx(tx_id: int, _=require_token):
+        try:
+            if not engine.portfolio.delete(tx_id):
+                raise HTTPException(404, "交易记录不存在")
+        except PortfolioError as exc:
+            raise HTTPException(400, f"不能删除：{exc}") from exc
+        return {"deleted": tx_id}
+
+    # ---------------------------------------------------------------- market overview + daily brief
+    @r.get("/market")
+    def market():
+        universe = list(db.get_watchlist(settings.watchlist))
+        snap = db.latest_snapshot() or {}
+        universe += [x["ticker"] for x in snap.get("ranking", [])[:30]]
+        return market_overview(store, universe)   # holdings stay out: this route is public
+
+    @r.get("/brief")
+    def brief(_=require_token):
+        return engine.brief()
+
+    @r.post("/brief/send")
+    def send_brief(_=require_token):
+        if not settings.telegram_enabled or not settings.telegram_chat_ids:
+            raise HTTPException(400, "需要配置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_IDS")
+        return {"sent": engine.notifier.send_private(engine.brief()["text"])}
 
     # ---------------------------------------------------------------- options + calendar
     @r.get("/options")

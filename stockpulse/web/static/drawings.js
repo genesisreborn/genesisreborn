@@ -1,5 +1,5 @@
 /* Drawing tools for the StockPulse chart (trend line, ray, extended line, horizontal / vertical line,
- * rectangle, Fibonacci retracement, text, measure). Drawings are stored as {time, price} points so they
+ * rectangle, Fibonacci retracement, text, measure, long / short position with risk sizing). Drawings are stored as {time, price} points so they
  * survive interval changes, and are saved per symbol on the server.
  *
  * Uses globals from chart.html: api, css, esc, fmt, state.
@@ -9,7 +9,12 @@
     ["cursor", "↖", "光标 / 选择（Esc）"], ["trend", "╱", "趋势线（Alt+T）"], ["ray", "➚", "射线"],
     ["extended", "⟷", "延长线"], ["hline", "─", "水平线（Alt+H）"], ["vline", "│", "垂直线（Alt+V）"],
     ["rect", "▭", "矩形"], ["fib", "≡", "斐波那契回撤（Alt+F）"], ["text", "T", "文字"], ["measure", "⇕", "测量（价格/涨跌/K 线数）"],
+    ["long", "⬆", "做多仓位：开仓 / 止损 / 目标、盈亏比和股数（Alt+L）"], ["short", "⬇", "做空仓位（Alt+S）"],
   ];
+  const POSITION = new Set(["long", "short"]);
+  // account size and risk per trade for the position tool's share count (per browser)
+  const risk = (() => { try { return { account: 100000, pct: 1, ...JSON.parse(localStorage.getItem("sp.risk") || "{}") }; } catch (e) { return { account: 100000, pct: 1 }; } })();
+  const saveRisk = () => { try { localStorage.setItem("sp.risk", JSON.stringify(risk)); } catch (e) {} };
   const TWO_POINT = new Set(["trend", "ray", "extended", "rect", "fib", "measure"]);
   const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618];
   const NAMES = Object.fromEntries(TOOLS.map(t => [t[0], t[2].split("（")[0]]));
@@ -152,10 +157,38 @@
         label(`${dp >= 0 ? "+" : ""}${priceText(dp)} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%) · ${nb} 根K线`, Math.min(a.x, b.x), Math.min(a.y, b.y) - 12, c); break;
       }
     }
+    if (POSITION.has(d.type)) drawPosition(d, pts, w);
     if (isSel) {
       ctx.setLineDash([]);
       pts.forEach(p => { ctx.fillStyle = css("--panel"); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); });
     }
+  }
+
+  function positionStats(d) {
+    const [entry, stop, target] = d.points.map(p => p.price);
+    const riskPer = Math.abs(entry - stop), reward = Math.abs(target - entry);
+    const shares = riskPer > 0 ? Math.floor(risk.account * risk.pct / 100 / riskPer) : 0;
+    return { entry, stop, target, rr: riskPer > 0 ? reward / riskPer : null, shares, riskAmt: shares * riskPer,
+             rewardAmt: shares * reward, notional: shares * entry,
+             stopPct: (stop / entry - 1) * 100, targetPct: (target / entry - 1) * 100 };
+  }
+  function drawPosition(d, pts, w) {
+    const [e, s, t] = pts;
+    const x0 = e.x, x1 = Math.max(s.x, e.x + 20);
+    const st = positionStats(d);
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = css("--up"); ctx.fillRect(x0, Math.min(e.y, t.y), x1 - x0, Math.abs(t.y - e.y));
+    ctx.fillStyle = css("--down"); ctx.fillRect(x0, Math.min(e.y, s.y), x1 - x0, Math.abs(s.y - e.y));
+    ctx.globalAlpha = 1;
+    line({ x: x0, y: e.y }, { x: x1, y: e.y }, css("--text"), 1, false);
+    line({ x: x0, y: t.y }, { x: x1, y: t.y }, css("--up"), 1, false);
+    line({ x: x0, y: s.y }, { x: x1, y: s.y }, css("--down"), 1, false);
+    const sign = (v) => (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
+    const money = (v) => Math.round(v).toLocaleString();
+    label(`目标 ${priceText(st.target)} (${sign(st.targetPct)}) · 盈 ${money(st.rewardAmt)}`, x0 + 2, t.y + (t.y < e.y ? -10 : 12), css("--up"));
+    label(`止损 ${priceText(st.stop)} (${sign(st.stopPct)}) · 亏 ${money(st.riskAmt)}`, x0 + 2, s.y + (s.y > e.y ? 12 : -10), css("--down"));
+    label(`${d.type === "long" ? "多" : "空"} ${priceText(st.entry)} · 盈亏比 ${st.rr == null ? "—" : st.rr.toFixed(2)} · ${st.shares} 股 (${money(st.notional)})`,
+          x1 + 4, e.y, css("--text"));   // right of the box, so it never collides with the stop / target labels
   }
 
   function redraw() {
@@ -208,6 +241,10 @@
         const inside = p.x >= Math.min(a.x, b.x) - 4 && p.x <= Math.max(a.x, b.x) + 4 && p.y >= Math.min(a.y, b.y) - 4 && p.y <= Math.max(a.y, b.y) + 4;
         if (inside) dist = 0;
       }
+      if (POSITION.has(d.type)) {
+        const ys = pts.map(q => q.y), x1 = Math.max(pts[1].x, pts[0].x + 20);
+        if (p.x >= pts[0].x - 4 && p.x <= x1 + 4 && p.y >= Math.min(...ys) - 4 && p.y <= Math.max(...ys) + 4) dist = 0;
+      }
       if (d.type === "text") dist = (p.x >= a.x - 4 && p.x <= a.x + 200 && p.y >= a.y - 16 && p.y <= a.y + 6) ? 0 : Infinity;
       if (dist < 6 && p.y <= h) return { d, handle: null };
     }
@@ -236,6 +273,12 @@
       if (TWO_POINT.has(tool)) {
         draft = { id: uid(), type: tool, points: [pt, { ...pt }], color: defaultColor(tool), width: 2 };
         drag = { mode: "draft", start: p };
+      } else if (POSITION.has(tool)) {
+        // stop 2% away, target at 2R, box 25 bars wide; all three handles can be dragged afterwards
+        const dir = tool === "long" ? 1 : -1, end = logicalToTime(timeToLogical(pt.time) + 25);
+        const stopPx = pt.price * (1 - dir * 0.02), targetPx = pt.price + dir * 2 * Math.abs(pt.price - stopPx);
+        draft = { id: uid(), type: tool, points: [pt, { time: end, price: stopPx }, { time: end, price: targetPx }], color: css("--s1"), width: 1 };
+        finishDraft();
       } else {
         const d = { id: uid(), type: tool, points: [pt], color: defaultColor(tool), width: tool === "text" ? 1 : 2 };
         if (tool === "text") { d.text = prompt("文字内容：", "") || ""; if (!d.text) return setTool("cursor"); }
@@ -264,7 +307,11 @@
       e.stopPropagation(); e.preventDefault();
       const pt = fromXY(p.x, p.y);
       if (!pt || !drag.start) return;
-      if (drag.mode === "handle") selected.points[drag.handle] = pt;
+      if (drag.mode === "handle" && POSITION.has(selected.type)) {
+        const pts = selected.points;
+        if (drag.handle === 0) pts[0] = pt;
+        else { pts[drag.handle].price = pt.price; pts[1].time = pts[2].time = pt.time; }   // stop & target share the box's right edge
+      } else if (drag.mode === "handle") selected.points[drag.handle] = pt;
       else {
         const dl = timeToLogical(pt.time) - timeToLogical(drag.start.time), dp = pt.price - drag.start.price;
         selected.points = drag.orig.map(q => ({ time: logicalToTime(timeToLogical(q.time) + dl), price: q.price + dp }));
@@ -301,14 +348,14 @@
     if (e.key === "Escape") { draft = null; setTool("cursor"); selected = null; renderProps(); dirty = true; }
     if ((e.key === "Delete" || e.key === "Backspace") && selected) { removeDrawing(selected); e.preventDefault(); }
     if (e.altKey) {
-      const map = { t: "trend", h: "hline", v: "vline", f: "fib" };
+      const map = { t: "trend", h: "hline", v: "vline", f: "fib", l: "long", s: "short" };
       const k = map[e.key.toLowerCase()];
       if (k) { setTool(k); e.preventDefault(); }
     }
   });
 
   function defaultColor(t) {
-    return { hline: css("--s4"), vline: css("--muted"), rect: css("--s7"), fib: css("--s2"), text: css("--text"), measure: css("--s1") }[t] || css("--s1");
+    return { long: css("--s1"), short: css("--s1"), hline: css("--s4"), vline: css("--muted"), rect: css("--s7"), fib: css("--s2"), text: css("--text"), measure: css("--s1") }[t] || css("--s1");
   }
 
   // ------------------------------------------------------------ toolbar & properties
@@ -343,6 +390,8 @@
       <button id="dpDash" class="${d.dash ? "on" : ""}" title="虚线">┄</button>
       <button id="dpLock" title="锁定">${d.locked ? "🔒" : "🔓"}</button>
       ${d.type === "text" ? '<button id="dpText">改文字</button>' : ""}
+      ${POSITION.has(d.type) ? `<label title="账户资金（用于算股数）">资金 <input id="dpAcct" type="number" min="0" step="1000" value="${risk.account}" style="width:90px"></label>
+        <label title="每笔愿意亏损的资金比例">风险% <input id="dpRisk" type="number" min="0.05" max="10" step="0.05" value="${risk.pct}" style="width:60px"></label>` : ""}
       ${d.type === "hline" ? `<button id="dpAlert" title="在这个价位设置提醒">🔔 ${d.alert ? "已设提醒" : "设提醒"}</button>` : ""}
       <button class="danger" id="dpDel" title="删除（Delete）">删除</button>`;
     const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
@@ -354,6 +403,9 @@
     on("dpText", () => { const t = prompt("修改文字：", d.text); if (t != null) { d.text = t; changed(); } });
     on("dpAlert", () => createAlert(d));
     on("dpDel", () => removeDrawing(d));
+    const acct = document.getElementById("dpAcct"), rp = document.getElementById("dpRisk");
+    if (acct) acct.onchange = () => { const v = +acct.value; if (v > 0) { risk.account = v; saveRisk(); dirty = true; } };
+    if (rp) rp.onchange = () => { const v = +rp.value; if (v > 0 && v <= 10) { risk.pct = v; saveRisk(); dirty = true; } };
   }
   function toHex(c) {
     if (!c) return "#3987e5";

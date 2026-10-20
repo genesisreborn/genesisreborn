@@ -126,6 +126,19 @@ def format_paper_event(ev: dict) -> str:
     return f"📒 模拟账户：{_e(ev['symbol'])} {_e(ev['action'])} 未成交（{_e(ev.get('note', ''))}）"
 
 
+def format_portfolio(pf: dict) -> str:
+    t = pf["totals"]
+    if not pf["positions"]:
+        return "持仓为空。在网页「图表 · 策略」→「持仓」里记录你的买卖。"
+    lines = [f"<b>💼 我的持仓</b>  市值 {t['market_value']:,.0f}",
+             f"今日 {t['day_change']:+,.0f}（{_pct(t['day_change_pct'])}） · 浮动 {t['unrealized']:+,.0f}（{_pct(t['unrealized_pct'])}）"
+             f" · 已实现 {t['realized'] + t['dividends']:+,.0f}"]
+    for p in pf["positions"][:20]:
+        lines.append(f"• <b>{_e(p['symbol'])}</b> {p['qty']:g} 股 @ {p['avg_cost']:.2f} → {p['last']:.2f}  "
+                     f"{_pct(p['unrealized_pct'])}  今日 {_pct(p['day_change_pct'])}  占比 {p['weight_pct']:.0f}%")
+    return "\n".join(lines)
+
+
 def format_realtime_alert(a: dict) -> str:
     kind = {"cross_up": "上穿", "cross_down": "下穿", "above": "高于", "below": "低于"}.get(a.get("kind"), "")
     lines = [f"⚡ <b>盘中提醒 · {_e(a['symbol'])}</b>", f"最新价 {a['price']} {kind} {a.get('level')}"]
@@ -153,6 +166,8 @@ class TelegramNotifier:
         self.client = client or httpx.Client(timeout=40)
         self.base = f"https://api.telegram.org/bot{settings.telegram_bot_token}"
         self._stop = threading.Event()
+        self.brief_fn = None        # set by the Engine: () -> str
+        self.portfolio_fn = None
 
     # ---- sending ----
     def is_owner(self, chat_id: str) -> bool:
@@ -193,6 +208,10 @@ class TelegramNotifier:
         """Account messages go only to TELEGRAM_CHAT_IDS when set (not to every subscriber)."""
         owners = [str(c) for c in self.settings.telegram_chat_ids]
         return sum(self.send(c, text) for c in owners) if owners else self.broadcast(text)
+
+    def send_private(self, text: str) -> int:
+        """Owners only; unlike notify_owners there is no fallback to every subscriber."""
+        return sum(self.send(c, text) for c in self.settings.telegram_chat_ids)
 
     def send_execution(self, rec: dict) -> int:
         return self.notify_owners(format_execution(rec))
@@ -238,7 +257,7 @@ class TelegramNotifier:
         if cmd in ("/start", "/subscribe"):
             self.db.add_subscriber(chat_id)
             return ("✅ 已订阅 StockPulse！你会收到每日热门股简报和盘中异动提醒。\n\n"
-                    "/report 最新 AI 报告\n/signals 最近交易信号\n/alerts 生效中的提醒\n/account 模拟账户\n/pause /resume 暂停/恢复券商自动交易\n/top 实时热门榜\n/stock TSLA 查看个股\n/stop 取消订阅")
+                    "/brief 盘前简报\n/portfolio 我的持仓\n/report 最新 AI 报告\n/signals 最近交易信号\n/alerts 生效中的提醒\n/account 模拟账户\n/pause /resume 暂停/恢复券商自动交易\n/top 实时热门榜\n/stock TSLA 查看个股\n/stop 取消订阅")
         if cmd in ("/stop", "/unsubscribe"):
             self.db.remove_subscriber(chat_id)
             return "已取消订阅。发送 /start 可重新订阅。"
@@ -258,6 +277,11 @@ class TelegramNotifier:
                 return "只有 TELEGRAM_CHAT_IDS 里配置的私聊（群里需在 TELEGRAM_ADMIN_IDS 里的用户）可以控制自动交易。"
             self.db.set_kv("broker_paused", "1" if cmd == "/pause" else "0")
             return "⏸ 自动交易已暂停，不会再向券商下新单。发送 /resume 恢复。" if cmd == "/pause" else "▶️ 自动交易已恢复。"
+        if cmd in ("/brief", "/portfolio"):
+            if not self.is_owner(chat_id):   # contains your holdings: owners only, never subscribers
+                return "只有 TELEGRAM_CHAT_IDS 里配置的管理员可以查看（简报里有你的持仓）。"
+            fn = self.brief_fn if cmd == "/brief" else self.portfolio_fn
+            return fn() if fn else "功能未启用。"
         if cmd == "/account":
             if self.settings.telegram_chat_ids and not self.is_owner(chat_id):
                 return "只有管理员可以查看账户。"
@@ -288,7 +312,7 @@ class TelegramNotifier:
                 if r["ticker"] == t:
                     return format_stock_detail(r)
             return f"{_e(t)} 目前不在热门榜/关注列表中。"
-        return "可用命令：/start /report /signals /alerts /account /pause /resume /top /stock TICKER /stop"
+        return "可用命令：/start /brief /portfolio /report /signals /alerts /account /pause /resume /top /stock TICKER /stop"
 
     def poll_forever(self) -> None:
         if not self.settings.telegram_enabled:

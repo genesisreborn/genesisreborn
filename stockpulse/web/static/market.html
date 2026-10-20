@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StockPulse 市场概览</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f5f7; --panel: #ffffff; --panel-2: #f7f8fa; --text: #131722; --muted: #5d6270; --line: #e0e3eb;
+  --accent: #2a78d6; --up: #089981; --down: #f23645; --up-rgb: 8, 153, 129; --down-rgb: 242, 54, 69;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #0f1117; --panel: #161a23; --panel-2: #1c212c; --text: #e6e8ee; --muted: #9aa0ad; --line: #2a2f3b;
+    --accent: #3987e5; --up: #22ab94; --down: #f7525f; --up-rgb: 34, 171, 148; --down-rgb: 247, 82, 95;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1117; --panel: #161a23; --panel-2: #1c212c; --text: #e6e8ee; --muted: #9aa0ad; --line: #2a2f3b;
+  --accent: #3987e5; --up: #22ab94; --down: #f7525f; --up-rgb: 34, 171, 148; --down-rgb: 247, 82, 95;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+button { font: inherit; color: inherit; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header a { color: var(--muted); text-decoration: none; }
+header a.on, header .brand { color: var(--text); font-weight: 700; }
+.seg { display: inline-flex; } .seg button { border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: 6px 0 0 6px; } .seg button:last-child { border-radius: 0 6px 6px 0; }
+.spacer { flex: 1; }
+.muted { color: var(--muted); }
+main { max-width: 1400px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+main > *, .grid2 > * { min-width: 0; }
+.scroll { overflow-x: auto; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.card h2 { font-size: 14px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+.card h2 .muted { font-weight: 400; font-size: 12px; }
+.indices { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+@media (max-width: 700px) { .indices { grid-template-columns: 1fr 1fr; } }
+.idx { background: var(--panel-2); border-radius: 8px; padding: 10px; text-decoration: none; color: inherit; display: block; }
+.idx:hover { outline: 1px solid var(--accent); }
+.idx .n { color: var(--muted); font-size: 12px; }
+.idx .p { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.up { color: var(--up); } .down { color: var(--down); }
+.grid2 { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; }
+.grid2.halves { grid-template-columns: 1fr 1fr; }
+@media (max-width: 900px) { .grid2, .grid2.halves { grid-template-columns: 1fr; } }
+.heat { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 4px; }
+.tile { border-radius: 6px; padding: 10px 8px; min-height: 64px; text-decoration: none; color: var(--text); display: flex; flex-direction: column;
+  justify-content: center; align-items: center; text-align: center; border: 1px solid var(--line); }
+.tile:hover { outline: 2px solid var(--accent); }
+.tile b { font-size: 13px; } .tile span { font-size: 12px; font-variant-numeric: tabular-nums; } .tile small { font-size: 11px; color: var(--muted); }
+.meter { margin: 8px 0; }
+.meter .lbl { display: flex; justify-content: space-between; font-size: 12px; }
+.meter .bar { height: 8px; border-radius: 4px; background: var(--panel-2); overflow: hidden; display: flex; }
+.meter .bar i { display: block; height: 100%; }
+table { width: 100%; border-collapse: collapse; }
+td, th { padding: 5px 4px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 11px; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.click { cursor: pointer; } tr.click:hover { background: var(--panel-2); }
+.legend { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.legend i { display: inline-block; width: 120px; height: 8px; border-radius: 4px;
+  background: linear-gradient(90deg, rgba(var(--down-rgb), .85), var(--panel-2), rgba(var(--up-rgb), .85)); }
+@media (max-width: 700px) { main { padding: 10px; } .heat { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); } }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">📈 StockPulse</span>
+  <a href="/">热门雷达</a><a href="/market" class="on">市场</a><a href="/chart">图表 · 策略</a>
+  <div class="seg" id="periods" role="group" aria-label="周期"></div>
+  <span class="spacer"></span>
+  <span class="muted" id="updated">加载中…</span>
+  <button id="themeBtn" title="切换主题" aria-label="切换主题">🌓</button>
+</header>
+<main>
+  <section class="card"><h2>主要指数 <span class="muted">（ETF / 指数，点击看图表）</span></h2><div class="indices" id="indices"></div></section>
+  <div class="grid2">
+    <section class="card"><h2>板块热力图 <span class="muted">SPDR 行业 ETF</span><span class="spacer"></span><span class="legend" id="legend"></span></h2><div class="heat" id="sectors"></div></section>
+    <section class="card"><h2>市场宽度 <span class="muted" id="bCount"></span></h2><div id="breadth"></div></section>
+  </div>
+  <section class="card"><h2>自选 + 热门股 <span class="muted">颜色 = 涨跌幅</span></h2><div class="heat" id="universe"></div></section>
+  <div class="grid2 halves">
+    <section class="card"><h2>涨幅榜</h2><div class="scroll"><table id="gainers"></table></div></section>
+    <section class="card"><h2>跌幅榜</h2><div class="scroll"><table id="losers"></table></div></section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = (v, d = 2) => v == null || Number.isNaN(v) ? "—" : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+const pct = (v) => v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+};
+const PERIODS = [["1d", "今日", 3], ["1w", "1 周", 6], ["1m", "1 月", 12], ["3m", "3 月", 20], ["ytd", "年初至今", 35], ["1y", "1 年", 50]];
+let period = PERIODS.some(p => p[0] === store.get("sp.mktPeriod")) ? store.get("sp.mktPeriod") : "1d";
+let data = null;
+
+const chartUrl = (s) => `/chart?symbol=${encodeURIComponent(s)}&interval=1d`;
+function val(r) { return r[data.periods[period]]; }
+function scale() { return PERIODS.find(p => p[0] === period)[2]; }
+function tileColor(v) {
+  if (v == null) return "var(--panel-2)";
+  const a = Math.min(Math.abs(v) / scale(), 1) * 0.85 + 0.08;
+  return `rgba(var(${v >= 0 ? "--up-rgb" : "--down-rgb"}), ${a.toFixed(2)})`;
+}
+function tiles(rows, withName) {
+  return rows.map(r => `<a class="tile" href="${chartUrl(r.symbol)}" style="background:${tileColor(val(r))}" title="${esc(r.name || r.symbol)} · ${fmt(r.price)}">
+    <b>${esc(withName && r.name ? r.name : r.symbol)}</b>${withName ? `<small>${esc(r.symbol)}</small>` : ""}<span>${pct(val(r))}</span></a>`).join("")
+    || '<p class="muted">没有数据</p>';
+}
+function meter(label, value, color) {
+  return `<div class="meter"><div class="lbl"><span>${label}</span><b>${value == null ? "—" : value.toFixed(0) + "%"}</b></div>
+    <div class="bar"><i style="width:${value || 0}%;background:${color}"></i></div></div>`;
+}
+function render() {
+  if (!data) return;
+  $("periods").innerHTML = PERIODS.map(([k, l]) => `<button data-p="${k}" class="${k === period ? "on" : ""}">${l}</button>`).join("");
+  $("periods").querySelectorAll("button").forEach(b => b.onclick = () => { period = b.dataset.p; store.set("sp.mktPeriod", period); render(); });
+  $("legend").innerHTML = `-${scale()}% <i></i> +${scale()}%`;
+  $("indices").innerHTML = data.indices.map(r => `<a class="idx" href="${chartUrl(r.symbol)}"><div class="n">${esc(r.name)} · ${esc(r.symbol)}</div>
+    <div class="p">${fmt(r.price)}</div><div class="${(val(r) || 0) >= 0 ? "up" : "down"}">${pct(val(r))}</div></a>`).join("");
+  $("sectors").innerHTML = tiles([...data.sectors].sort((a, b) => (val(b) ?? -1e9) - (val(a) ?? -1e9)), true);
+  $("universe").innerHTML = tiles([...data.universe].sort((a, b) => (val(b) ?? -1e9) - (val(a) ?? -1e9)), false);
+  const b = data.breadth;
+  $("bCount").textContent = b.count ? `自选 + 热门 ${b.count} 只` : "";
+  if (!b.count) { $("breadth").innerHTML = '<p class="muted">没有数据</p>'; }
+  else {
+    const adv = b.advancers / Math.max(1, b.advancers + b.decliners) * 100;
+    $("breadth").innerHTML = `<div class="meter"><div class="lbl"><span class="up">上涨 ${b.advancers}</span><span class="down">下跌 ${b.decliners}</span></div>
+      <div class="bar"><i style="width:${adv}%;background:var(--up)"></i><i style="width:${100 - adv}%;background:var(--down)"></i></div></div>`
+      + meter("站上 50 日线", b.above_sma50_pct, "var(--accent)") + meter("站上 200 日线", b.above_sma200_pct, "var(--accent)")
+      + meter("接近 52 周新高（2% 内）", b.near_high_pct, "var(--up)") + meter("接近 52 周新低（2% 内）", b.near_low_pct, "var(--down)")
+      + `<p class="muted" style="font-size:12px;margin:8px 0 0">RSI 超买（≥70）${b.rsi_overbought} 只 · 超卖（≤30）${b.rsi_oversold} 只</p>`;
+  }
+  const table = (rows) => `<thead><tr><th>代码</th><th class="num">价格</th><th class="num">今日</th><th class="num">量比</th><th class="num">1 月</th><th class="num">RSI</th></tr></thead><tbody>` +
+    rows.map(r => `<tr class="click" data-s="${esc(r.symbol)}"><td><b>${esc(r.symbol)}</b></td><td class="num">${fmt(r.price)}</td>
+      <td class="num ${(r.change_pct || 0) >= 0 ? "up" : "down"}">${pct(r.change_pct)}</td><td class="num">${fmt(r.rel_volume)}</td>
+      <td class="num">${pct(r.perf_1m)}</td><td class="num">${fmt(r.rsi14, 0)}</td></tr>`).join("") + "</tbody>";
+  $("gainers").innerHTML = table(data.gainers); $("losers").innerHTML = table(data.losers);
+  document.querySelectorAll("tr.click").forEach(tr => tr.onclick = () => { location.href = chartUrl(tr.dataset.s); });
+}
+async function load() {
+  try {
+    const res = await fetch("/api/market");
+    if (!res.ok) throw new Error(res.status);
+    data = await res.json();
+    $("updated").textContent = "更新于 " + new Date().toLocaleTimeString();
+    render();
+  } catch (e) { $("updated").textContent = "加载失败：" + e.message; }
+}
+$("themeBtn").onclick = () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  store.set("theme", root.dataset.theme);
+};
+(() => { const t = store.get("theme", null); if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; })();
+load();
+setInterval(() => { if (!document.hidden) load(); }, 60000);
+</script>
+</body>
+</html>

@@ -125,6 +125,12 @@ th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line
 th { color: var(--muted); font-weight: 500; font-size: 11px; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.click { cursor: pointer; } tr.click:hover { background: var(--panel-2); }
+.pf-form { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pf-form textarea, .pf-form #pfTags, .pf-form #pfAdd { grid-column: 1 / -1; }
+.pf-form input, .pf-form select, .pf-form textarea { min-width: 0; width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; }
+.pf-tx { border-bottom: 1px solid var(--line); padding: 6px 0; font-size: 12px; }
+.pf-tx .note { color: var(--muted); white-space: pre-wrap; margin-top: 2px; }
+.pf-tx button { padding: 1px 6px; font-size: 11px; }
 .tool-menu { min-width: 200px; padding: 4px; left: auto; right: 0; }
 .tool-menu button, .tool-menu a { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 7px 10px; border-radius: 6px;
   color: var(--text); text-decoration: none; font-size: 13px; }
@@ -198,7 +204,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 <div class="app">
   <header class="topbar">
     <span class="brand">📈 StockPulse</span>
-    <nav class="nav"><a href="/">热门雷达</a><a href="/chart" class="on">图表 · 策略</a></nav>
+    <nav class="nav"><a href="/">热门雷达</a><a href="/market">市场</a><a href="/chart" class="on">图表 · 策略</a></nav>
     <input id="symbolInput" list="symbolList" aria-label="股票代码" placeholder="代码">
     <datalist id="symbolList"></datalist>
     <div class="seg" id="intervals" role="group" aria-label="周期"></div>
@@ -396,6 +402,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
         <button data-tab="strategy">策略</button>
         <button data-tab="signals">信号</button>
         <button data-tab="alerts">提醒</button>
+        <button data-tab="portfolio">持仓</button>
         <button data-tab="account">账户</button>
       </div>
 
@@ -487,6 +494,31 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
         <div class="section-title">最近信号</div>
         <div id="sigList"></div>
         <p class="muted" style="font-size:11px" id="sigNote"></p>
+      </div>
+
+      <div class="tab" id="tab-portfolio">
+        <div class="section-title">我的持仓 <span class="spacer"></span><button id="pfRefresh">刷新</button><button id="pfCsv" title="导出全部交易记录">CSV</button></div>
+        <div class="metrics" id="pfMetrics" style="padding:0"></div>
+        <div id="pfChart" style="height:150px;margin:8px 0"></div>
+        <div class="muted" style="font-size:11px" id="pfChartNote"></div>
+        <div style="overflow:auto"><table>
+          <thead><tr><th>代码</th><th class="num">股数</th><th class="num">成本</th><th class="num">现价</th><th class="num">盈亏</th><th class="num">今日</th><th class="num">占比</th></tr></thead>
+          <tbody id="pfPos"></tbody></table></div>
+        <div class="section-title">记一笔交易</div>
+        <div class="pf-form">
+          <input id="pfSym" placeholder="代码">
+          <select id="pfSide"><option value="BUY">买入</option><option value="SELL">卖出</option><option value="DIV">分红</option></select>
+          <input id="pfQty" type="number" min="0" step="any" placeholder="股数">
+          <input id="pfPrice" type="number" min="0" step="any" placeholder="价格">
+          <input id="pfDate" type="datetime-local" title="成交时间">
+          <input id="pfFee" type="number" min="0" step="any" placeholder="手续费">
+          <textarea id="pfNote" rows="2" placeholder="交易日志：为什么买 / 卖，计划，情绪…（可选）"></textarea>
+          <input id="pfTags" placeholder="标签，如 突破, 财报（可选）">
+          <button class="primary" id="pfAdd">记录</button>
+        </div>
+        <div class="muted" style="font-size:11px" id="pfMsg"></div>
+        <div class="section-title">交易日志 <span class="spacer"></span><label style="font-weight:400;font-size:12px"><input type="checkbox" id="pfOnlySym"> 只看当前代码</label></div>
+        <div id="pfTx"></div>
       </div>
 
       <div class="tab" id="tab-account">
@@ -597,6 +629,7 @@ async function api(path, opts = {}) {
   const tok = store.get("sp.token", "");
   if (tok) headers.Authorization = "Bearer " + tok;
   let res = await fetch(path, { ...opts, headers });
+  if (res.status === 401 && opts.quiet) throw new Error("需要 API_TOKEN");
   if (res.status === 401) {
     const t = prompt("这个操作需要 API_TOKEN（在 .env 里）：");
     if (!t) throw new Error("需要 API_TOKEN");
@@ -850,7 +883,7 @@ function applyMarkers() {
     const color = sh.color || css(up ? "--up" : "--down");
     sh.data.forEach(p => marks.push({ time: p.time, position: up ? "belowBar" : "aboveBar", shape: up ? "arrowUp" : "arrowDown", color }));
   }
-  marks = marks.filter(m => times.has(m.time)).concat(eventMarkers());
+  marks = marks.filter(m => times.has(m.time)).concat(eventMarkers(), myTradeMarkers());
   markersApi.setMarkers(marks.sort((a, b) => a.time - b.time));
 }
 function nextBarTime(t) {
@@ -1080,6 +1113,117 @@ $("scrFilter").addEventListener("keydown", e => { if (e.key === "Enter") runScre
 // ---------------------------------------------------------------- fundamentals + corporate events
 let fundData = null, fundPeriod = "quarterly", fundStmtType = "income", showEvents = store.get("sp.events", true);
 const EVT = { earnings: ["E", "--s3"], dividend: ["D", "--up"], split: ["S", "--s4"] };
+// ---------------------------------------------------------------- portfolio (real holdings) + trade journal
+let pfData = null, myTrades = { symbol: null, txs: [] }, pfChart = null;
+function snapToBar(t) {   // last bar starting at or before t
+  const bars = lastData ? lastData.bars : [];
+  if (!bars.length || t < bars[0].time) return null;
+  let lo = 0, hi = bars.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (bars[mid].time <= t) lo = mid; else hi = mid - 1; }
+  return bars[lo].time;
+}
+function myTradeMarkers() {
+  if (myTrades.symbol !== state.symbol) return [];
+  return myTrades.txs.filter(t => t.side !== "DIV").map(t => {
+    const time = snapToBar(t.ts), buy = t.side === "BUY";
+    return time == null ? null : { time, position: buy ? "belowBar" : "aboveBar", shape: buy ? "arrowUp" : "arrowDown",
+      color: css("--s7"), text: `${buy ? "我买" : "我卖"} ${t.qty}@${fmt(t.price)}` };
+  }).filter(Boolean);
+}
+async function loadMyTrades() {
+  const sym = state.symbol;
+  try { const txs = await api("/api/portfolio/tx?" + new URLSearchParams({ symbol: sym }), { quiet: true }); if (sym === state.symbol) { myTrades = { symbol: sym, txs }; applyMarkers(); } }
+  catch (e) { myTrades = { symbol: sym, txs: [] }; }
+}
+function pfPrefill() {
+  if (!$("pfSym").value) $("pfSym").value = state.symbol;
+  if (!$("pfPrice").value && lastData && lastData.bars.length) $("pfPrice").value = lastData.bars[lastData.bars.length - 1].close;
+  if (!$("pfDate").value) { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); $("pfDate").value = d.toISOString().slice(0, 16); }
+}
+async function loadPortfolio() {
+  try { pfData = await api("/api/portfolio"); } catch (e) { $("pfMetrics").innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+  renderPortfolio();
+}
+function renderPortfolio() {
+  const d = pfData; if (!d) return;
+  const t = d.totals;
+  const money = (v, sign) => v == null ? "—" : (sign && v >= 0 ? "+" : "") + Math.round(v).toLocaleString();
+  const cls = (v) => v == null ? "" : v >= 0 ? "up" : "down";
+  const m = (l, v, c = "", sub = "") => `<div class="metric"><span>${l}</span><b class="${c}">${v}</b>${sub ? `<span>${sub}</span>` : ""}</div>`;
+  $("pfMetrics").innerHTML = m("市值", money(t.market_value)) + m("今日", money(t.day_change, 1), cls(t.day_change), pctHtml(t.day_change_pct))
+    + m("浮动盈亏", money(t.unrealized, 1), cls(t.unrealized), pctHtml(t.unrealized_pct))
+    + m("已实现 + 分红", money(t.realized + t.dividends, 1), cls(t.realized + t.dividends)) + m("总盈亏", money(t.total_pnl, 1), cls(t.total_pnl));
+  $("pfPos").innerHTML = d.positions.map(p => `<tr class="click" data-s="${esc(p.symbol)}"><td><b>${esc(p.symbol)}</b></td><td class="num">${fmt(p.qty, Number.isInteger(p.qty) ? 0 : 2)}</td>
+    <td class="num">${fmt(p.avg_cost)}</td><td class="num">${fmt(p.last)}</td><td class="num">${pctHtml(p.unrealized_pct)}</td>
+    <td class="num">${pctHtml(p.day_change_pct)}</td><td class="num">${p.weight_pct.toFixed(0)}%</td></tr>`).join("")
+    || '<tr><td colspan="7" class="muted">还没有持仓。在下面记录你在任意券商的买卖，系统会算成本、盈亏和占比。</td></tr>';
+  $("pfPos").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => setSymbol(tr.dataset.s));
+  renderPfTx(); renderPfChart();
+}
+function renderPfChart() {
+  const pts = (pfData.history || {}).points || [];
+  $("pfChart").style.display = pts.length > 1 ? "" : "none";
+  $("pfChartNote").textContent = pts.length > 1 ? "实线 = 持仓市值，虚线 = 投入成本，绿线 = 同样的买卖金额投到 SPY" : "";
+  if (pts.length < 2) return;
+  if (pfChart) pfChart.remove();
+  pfChart = LWC.createChart($("pfChart"), { autoSize: true, layout: { background: { color: "transparent" }, textColor: css("--muted"), fontSize: 10 },
+    grid: { vertLines: { visible: false }, horzLines: { color: css("--grid") } }, rightPriceScale: { borderVisible: false },
+    timeScale: { borderVisible: false }, handleScroll: false, handleScale: false });
+  const add = (key, color, style) => pfChart.addSeries(LWC.LineSeries, { color, lineWidth: 2, lineStyle: style, priceLineVisible: false, lastValueVisible: false })
+    .setData(pts.map(p => ({ time: p.time, value: p[key] })));
+  add("cost", css("--muted"), LWC.LineStyle.Dashed); add("benchmark", css("--up"), LWC.LineStyle.Solid); add("value", css("--s1"), LWC.LineStyle.Solid);
+  pfChart.timeScale().fitContent();
+}
+function renderPfTx() {
+  const only = $("pfOnlySym").checked;
+  const txs = (pfData.transactions || []).filter(t => !only || t.symbol === state.symbol);
+  const SIDE = { BUY: ["买入", "up"], SELL: ["卖出", "down"], DIV: ["分红", ""] };
+  $("pfTx").innerHTML = txs.map(t => {
+    const [label, c] = SIDE[t.side] || [t.side, ""];
+    const when = new Date(t.ts * 1000).toLocaleString([], { year: "2-digit", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const what = t.side === "DIV" ? `${fmt(t.price)}` : `${t.qty} 股 @ ${fmt(t.price)}`;
+    return `<div class="pf-tx" data-id="${t.id}"><div class="row" style="margin:0;gap:6px"><span style="flex:1"><span class="${c}">${label}</span> <b>${esc(t.symbol)}</b> ${what}
+      ${t.fee ? `<span class="muted">费 ${fmt(t.fee)}</span>` : ""} <span class="muted">${esc(when)}</span>
+      ${t.tags ? t.tags.split(/[,，]/).filter(Boolean).map(x => `<span class="badge">${esc(x.trim())}</span>`).join(" ") : ""}</span>
+      <button data-a="note" style="flex:0 0 auto">日志</button><button class="danger" data-a="del" style="flex:0 0 auto" aria-label="删除">×</button></div>
+      ${t.note ? `<div class="note">${esc(t.note)}</div>` : ""}</div>`;
+  }).join("") || '<p class="muted" style="font-size:12px">还没有交易记录。</p>';
+  $("pfTx").querySelectorAll(".pf-tx").forEach(el => el.querySelectorAll("button").forEach(b => b.onclick = async () => {
+    const t = txs.find(x => String(x.id) === el.dataset.id);
+    try {
+      if (b.dataset.a === "del") {
+        if (!confirm(`删除这条 ${t.symbol} 的记录？`)) return;
+        await api(`/api/portfolio/tx/${t.id}`, { method: "DELETE" });
+      } else {
+        const note = prompt("交易日志（为什么、计划、复盘）：", t.note || ""); if (note == null) return;
+        const tags = prompt("标签（逗号分隔）：", t.tags || ""); if (tags == null) return;
+        await api(`/api/portfolio/tx/${t.id}`, { method: "PUT", body: JSON.stringify({ note, tags }) });
+      }
+      await loadPortfolio(); loadMyTrades();
+    } catch (e) { alert(e.message); }
+  }));
+}
+$("pfAdd").onclick = async () => {
+  const ts = $("pfDate").value ? Math.floor(new Date($("pfDate").value).getTime() / 1000) : null;
+  try {
+    await api("/api/portfolio/tx", { method: "POST", body: JSON.stringify({ symbol: $("pfSym").value, side: $("pfSide").value,
+      qty: +$("pfQty").value || 0, price: +$("pfPrice").value, ts, fee: +$("pfFee").value || 0, note: $("pfNote").value, tags: $("pfTags").value }) });
+    $("pfMsg").textContent = "✓ 已记录"; $("pfMsg").className = "up";
+    ["pfQty", "pfFee", "pfNote", "pfTags"].forEach(id => $(id).value = "");
+    await loadPortfolio(); loadMyTrades();
+  } catch (e) { $("pfMsg").textContent = e.message; $("pfMsg").className = "down"; }
+};
+$("pfSide").onchange = () => { $("pfQty").disabled = $("pfSide").value === "DIV"; $("pfPrice").placeholder = $("pfSide").value === "DIV" ? "分红总金额" : "价格"; };
+$("pfRefresh").onclick = loadPortfolio;
+$("pfOnlySym").onchange = () => pfData && renderPfTx();
+$("pfCsv").onclick = () => {
+  if (!pfData) return;
+  const rows = [["时间", "代码", "类型", "数量", "价格", "手续费", "标签", "日志"]].concat(pfData.transactions.map(t =>
+    [new Date(t.ts * 1000).toISOString(), t.symbol, t.side, t.qty, t.price, t.fee, t.tags || "", (t.note || "").replace(/\n/g, " ")]));
+  const csv = "\ufeff" + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "portfolio_journal.csv"; a.click();
+};
+
 function eventMarkers() {
   if (!showEvents || !fundData || fundData.symbol !== state.symbol || !lastData) return [];
   const bars = lastData.bars; if (!bars.length) return [];
@@ -1343,6 +1487,7 @@ function setSymbol(sym, interval) {
   $("symbolInput").value = sym;
   lastData = null;
   loadChart().then(() => {
+    loadMyTrades();
     if (!$("fundView").hidden) $("fundBtn").click();
     else if (!$("chainView").hidden) $("chainBtn").click();
     else if (showEvents) loadFundamentals();
@@ -1388,6 +1533,7 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
   store.set("sp.tab", b.dataset.tab);
   if (b.dataset.tab === "signals") loadSignals();
   if (b.dataset.tab === "account") { loadPaper(); loadBroker(); }
+  if (b.dataset.tab === "portfolio") { loadPortfolio(); pfPrefill(); }
   if (b.dataset.tab === "alerts") { $("aSym").value = state.symbol; $("aInterval").value = state.interval; $("aType").onchange(); loadAlerts(); }
 });
 
@@ -1824,7 +1970,7 @@ if (params.get("symbol")) state.symbol = params.get("symbol").toUpperCase();
 if (params.get("interval")) state.interval = params.get("interval");
 $("symbolInput").value = state.symbol;
 renderIntervals(); renderIndMenu(); renderScaleBtns();
-loadChart().then(() => { if (showEvents) loadFundamentals(); }); loadWatch();
+loadChart().then(() => { if (showEvents) loadFundamentals(); loadMyTrades(); }); loadWatch();
 loadMeta().then(() => { configToForm(store.get("sp.draft", { name: "", interval: state.interval, symbols: [state.symbol] })); }).catch(() => {});
 loadStrategies().catch(() => {});
 loadScripts();
