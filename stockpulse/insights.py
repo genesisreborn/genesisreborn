@@ -1,4 +1,8 @@
-"""Turn the ranking into human-readable views (Claude if configured, rules otherwise)."""
+"""Turn the ranking into human-readable views.
+
+Periodic refreshes only use the free rule engine. Claude is called once per
+report (see report.py), never on the refresh loop.
+"""
 from __future__ import annotations
 
 import json
@@ -12,7 +16,11 @@ log = logging.getLogger(__name__)
 INSIGHT_SCHEMA = {
     "type": "object",
     "properties": {
+        "headline": {"type": "string"},
         "market_overview": {"type": "string"},
+        "top_picks": {"type": "array", "items": {"type": "string"}},
+        "outlook": {"type": "string"},
+        "risk_warning": {"type": "string"},
         "themes": {"type": "array", "items": {"type": "string"}},
         "stocks": {
             "type": "array",
@@ -31,17 +39,21 @@ INSIGHT_SCHEMA = {
             },
         },
     },
-    "required": ["market_overview", "themes", "stocks"],
+    "required": ["headline", "market_overview", "themes", "top_picks", "outlook", "risk_warning", "stocks"],
     "additionalProperties": False,
 }
 
 SYSTEM_PROMPT = """你是一名谨慎的美股市场分析师，为个人投资者撰写简明的中文盘面观察。
 你会收到一个由程序计算出的"热门股"列表：每只股票附带资讯/社交讨论热度、热度变化倍数、情绪分数(-1~1)、
-价格与成交量数据，以及最近的标题。请基于这些证据：
-- market_overview：2-4 句话概括当前市场热点与情绪。
+价格与成交量数据，以及最近的标题。请基于这些证据写一份当日报告：
+- headline：一句话标题，点出今天最重要的热点。
+- market_overview：3-5 句话概括当前市场热点与情绪。
 - themes：3-5 个正在发酵的主题（如"AI 算力"、"量子计算"）。
 - stocks：对每只股票给出 view(bullish/neutral/bearish)、confidence(0-100)、catalyst(驱动因素)、
   risks(主要风险)、summary(一句话看法)。
+- top_picks：从列表中挑出 1-5 只"热度与基本面消息共振、短期上涨概率相对较高"的股票代码；没有合适的就给空数组。
+- outlook：接下来 1-2 个交易日值得关注的事件、板块或价位信号。
+- risk_warning：当前最需要警惕的风险（炒作过热、负面消息、追高等）。
 要求：只依据给出的数据与标题推断，不要编造未提供的财务数字或事件；热度高但情绪偏空或已大涨的要明确提示追高/回调风险；
 社交媒体炒作要与基本面新闻区分开。全部用简体中文。"""
 
@@ -70,7 +82,7 @@ def claude_insights(ranking: list[dict], settings: Settings) -> dict[str, Any] |
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",
             thinking={"type": "adaptive"},
-            output_config={"effort": "medium", "format": {"type": "json_schema", "schema": INSIGHT_SCHEMA}},
+            output_config={"effort": "high", "format": {"type": "json_schema", "schema": INSIGHT_SCHEMA}},
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": "今日热门股数据：\n" + _payload(ranking)}],
         )
@@ -131,11 +143,14 @@ def rule_insights(ranking: list[dict]) -> dict[str, Any]:
     overview = (f"当前共追踪 {len(ranking)} 只热门股，" +
                 (f"看涨信号最强的是 {', '.join(bulls)}。" if bulls else "暂无明显强势看涨信号。") +
                 "（规则引擎生成；配置 ANTHROPIC_API_KEY 可获得 AI 深度点评）")
-    return {"market_overview": overview, "themes": [], "stocks": stocks, "engine": "rules"}
+    picks = [s["ticker"] for s in stocks if s["view"] == "bullish" and s["confidence"] >= 70][:5]
+    return {"headline": f"热度榜前三：{', '.join(r['ticker'] for r in ranking[:3])}" if ranking else "暂无热门股",
+            "market_overview": overview, "themes": [], "top_picks": picks, "outlook": "",
+            "risk_warning": "热度主要反映讨论量与舆论情绪，不代表价格一定上涨。", "stocks": stocks, "engine": "rules"}
 
 
-def build_insights(ranking: list[dict], settings: Settings) -> dict[str, Any]:
-    if settings.claude_enabled and ranking:
+def build_insights(ranking: list[dict], settings: Settings, use_claude: bool = False) -> dict[str, Any]:
+    if use_claude and settings.claude_enabled and ranking:
         got = claude_insights(ranking, settings)
         if got:
             return got

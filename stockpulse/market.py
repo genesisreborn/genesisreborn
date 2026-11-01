@@ -6,6 +6,8 @@ import math
 import random
 from dataclasses import asdict, dataclass
 
+import pandas as pd
+
 log = logging.getLogger(__name__)
 
 
@@ -34,7 +36,8 @@ def quotes_from_frame(tickers: list[str], df) -> dict[str, Quote]:
     out: dict[str, Quote] = {}
     for t in tickers:
         try:
-            sub = df[t] if len(tickers) > 1 else df
+            # yfinance returns (Ticker, Price) columns even for a single ticker
+            sub = df[t] if isinstance(df.columns, pd.MultiIndex) else df
             sub = sub.dropna(subset=["Close"])
             if len(sub) < 2:
                 continue

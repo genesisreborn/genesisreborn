@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 VIEW_ICON = {"bullish": "🟢", "neutral": "🟡", "bearish": "🔴"}
 DISCLAIMER = "<i>⚠️ 以上内容由程序根据公开资讯自动生成，仅供参考，不构成投资建议。</i>"
+REPORT_TITLE = "📊 StockPulse 每日 AI 报告"
 MAX_LEN = 4000  # Telegram hard limit is 4096
 
 
@@ -40,13 +41,22 @@ def format_stock_line(i: int, r: dict) -> str:
 
 
 def format_report(snap: dict, limit: int = 10, title: str = "📈 StockPulse 热门股简报") -> str:
+    ins = snap.get("insights") or {}
     parts = [f"<b>{title}</b>", f"<i>{_e(snap['generated_at'])} UTC</i>", ""]
+    if ins.get("headline"):
+        parts += [f"<b>{_e(ins['headline'])}</b>", ""]
     if snap.get("market_overview"):
         parts += [f"🧭 {_e(snap['market_overview'])}", ""]
     if snap.get("themes"):
         parts += ["🔥 主题：" + " · ".join(_e(t) for t in snap["themes"]), ""]
+    if ins.get("top_picks"):
+        parts += ["⭐ 重点关注：" + "、".join(_e(t) for t in ins["top_picks"]), ""]
     for i, r in enumerate(snap.get("ranking", [])[:limit], 1):
         parts.append(format_stock_line(i, r))
+    if ins.get("outlook"):
+        parts += ["", f"🔭 <b>后市关注</b>：{_e(ins['outlook'])}"]
+    if ins.get("risk_warning"):
+        parts += ["", f"⚠️ <b>风险提示</b>：{_e(ins['risk_warning'])}"]
     parts += ["", DISCLAIMER]
     return "\n".join(parts)
 
@@ -69,6 +79,86 @@ def format_stock_detail(r: dict) -> str:
     return "\n".join(lines)
 
 
+SIGNAL_ICON = {"BUY": "🟢", "SELL": "🔵", "SHORT": "🔴", "COVER": "🟣"}
+
+
+def format_signal(sig: dict) -> str:
+    from .strategy.backtest import ACTION_ZH, REASON_ZH
+    from .strategy.signals import bar_time_str
+
+    lines = [f"{SIGNAL_ICON.get(sig['action'], '⚪')} <b>{_e(ACTION_ZH.get(sig['action'], sig['action']))}信号 · "
+             f"{_e(sig['symbol'])}</b>（{_e(sig['interval'])}）",
+             f"策略：{_e(sig['strategy'])}",
+             f"触发：{_e(REASON_ZH.get(sig['reason'], sig['reason']))} · K 线 {_e(bar_time_str(sig['bar_ts'], sig['interval']))}"]
+    if sig["reason"] in ("stop", "take_profit"):
+        lines.append(f"成交价约 {sig['price']}")
+    else:
+        lines.append(f"收盘价 {sig['price']} → 按策略在下一根 K 线开盘执行")
+    if sig.get("stop"):
+        lines.append(f"参考止损 {sig['stop']}")
+    if sig.get("target"):
+        lines.append(f"参考止盈 {sig['target']}")
+    lines += ["", "<i>⚠️ 策略信号由程序按你设定的规则自动生成，仅供参考，不构成投资建议。</i>"]
+    return "\n".join(lines)
+
+
+def format_execution(rec: dict) -> str:
+    icon = {"submitted": "✅", "rejected": "⛔", "error": "❗"}.get(rec["status"], "ℹ️")
+    mode = "实盘" if rec["mode"] == "live" else "Alpaca 模拟盘"
+    head = {"submitted": "已下单", "rejected": "未下单", "error": "下单失败"}.get(rec["status"], rec["status"])
+    lines = [f"{icon} <b>自动交易 · {head}</b>（{mode}）",
+             f"{_e(rec['action'])} {_e(rec['symbol'])}" + (f" × {rec['qty']:g}" if rec.get("qty") else ""),
+             f"策略：{_e(rec.get('strategy') or '')}"]
+    if rec.get("detail"):
+        lines.append(f"说明：{_e(rec['detail'])}")
+    return "\n".join(lines)
+
+
+def format_paper_event(ev: dict) -> str:
+    if ev["type"] == "fill":
+        extra = "".join([f" · 止损 {ev['stop']}" if ev.get("stop") else "", f" · 止盈 {ev['target']}" if ev.get("target") else ""])
+        return f"📒 <b>模拟账户成交</b>\n{_e(ev['action'])} {_e(ev['symbol'])} × {ev['qty']:g} @ {ev['price']}{_e(extra)}\n策略：{_e(ev['strategy'])}"
+    if ev["type"] == "close":
+        icon = "🟢" if ev["pnl"] >= 0 else "🔴"
+        why = {"stop": "止损", "take_profit": "止盈", "signal": "策略信号"}.get(ev["reason"], ev["reason"])
+        return (f"📒 <b>模拟账户平仓</b>（{why}）\n{_e(ev['symbol'])} × {ev['qty']:g} @ {ev['price']}\n"
+                f"{icon} 盈亏 {ev['pnl']:+,.2f}（{ev['pnl_pct']:+.2f}%）· 策略：{_e(ev['strategy'])}")
+    return f"📒 模拟账户：{_e(ev['symbol'])} {_e(ev['action'])} 未成交（{_e(ev.get('note', ''))}）"
+
+
+def format_portfolio(pf: dict) -> str:
+    t = pf["totals"]
+    if not pf["positions"]:
+        return "持仓为空。在网页「图表 · 策略」→「持仓」里记录你的买卖。"
+    lines = [f"<b>💼 我的持仓</b>  市值 {t['market_value']:,.0f}",
+             f"今日 {t['day_change']:+,.0f}（{_pct(t['day_change_pct'])}） · 浮动 {t['unrealized']:+,.0f}（{_pct(t['unrealized_pct'])}）"
+             f" · 已实现 {t['realized'] + t['dividends']:+,.0f}"]
+    for p in pf["positions"][:20]:
+        lines.append(f"• <b>{_e(p['symbol'])}</b> {p['qty']:g} 股 @ {p['avg_cost']:.2f} → {p['last']:.2f}  "
+                     f"{_pct(p['unrealized_pct'])}  今日 {_pct(p['day_change_pct'])}  占比 {p['weight_pct']:.0f}%")
+    return "\n".join(lines)
+
+
+def format_realtime_alert(a: dict) -> str:
+    kind = {"cross_up": "上穿", "cross_down": "下穿", "above": "高于", "below": "低于"}.get(a.get("kind"), "")
+    lines = [f"⚡ <b>盘中提醒 · {_e(a['symbol'])}</b>", f"最新价 {a['price']} {kind} {a.get('level')}"]
+    if a.get("note"):
+        lines.append(f"备注：{_e(a['note'])}")
+    return "\n".join(lines)
+
+
+def format_alert(a: dict) -> str:
+    from .strategy.signals import bar_time_str
+
+    lines = [f"🔔 <b>提醒触发 · {_e(a['symbol'])}</b>（{_e(a['interval'])}）",
+             f"条件：<code>{_e(a['condition'])}</code>",
+             f"收盘价 {a['close']} · K 线 {_e(bar_time_str(a['bar_ts'], a['interval']))}"]
+    if a.get("note"):
+        lines.append(f"备注：{_e(a['note'])}")
+    lines.append("（一次性提醒，已自动关闭）" if a.get("mode") == "once" else "（每根 K 线满足条件都会提醒）")
+    return "\n".join(lines)
+
+
 class TelegramNotifier:
     def __init__(self, settings: Settings, db: Database, client: httpx.Client | None = None):
         self.settings = settings
@@ -76,8 +166,13 @@ class TelegramNotifier:
         self.client = client or httpx.Client(timeout=40)
         self.base = f"https://api.telegram.org/bot{settings.telegram_bot_token}"
         self._stop = threading.Event()
+        self.brief_fn = None        # set by the Engine: () -> str
+        self.portfolio_fn = None
 
     # ---- sending ----
+    def is_owner(self, chat_id: str) -> bool:
+        return str(chat_id) in {str(c) for c in self.settings.telegram_chat_ids}
+
     def recipients(self) -> list[str]:
         return sorted(set(self.settings.telegram_chat_ids) | set(self.db.subscribers()))
 
@@ -101,11 +196,37 @@ class TelegramNotifier:
     def broadcast(self, text: str) -> int:
         return sum(self.send(c, text) for c in self.recipients())
 
-    def send_daily_report(self) -> int:
-        snap = self.db.latest_snapshot()
+    def send_report(self, snap: dict | None = None) -> int:
+        """Broadcast a report (defaults to the latest stored one; never calls Claude)."""
+        snap = snap or self.db.get_report() or self.db.latest_snapshot()
         if not snap:
             return 0
-        return self.broadcast(format_report(snap))
+        return self.broadcast(format_report(snap, title=REPORT_TITLE if snap.get("report_id") else
+                                            "📈 StockPulse 热门股简报"))
+
+    def notify_owners(self, text: str) -> int:
+        """Account messages go only to TELEGRAM_CHAT_IDS when set (not to every subscriber)."""
+        owners = [str(c) for c in self.settings.telegram_chat_ids]
+        return sum(self.send(c, text) for c in owners) if owners else self.broadcast(text)
+
+    def send_private(self, text: str) -> int:
+        """Owners only; unlike notify_owners there is no fallback to every subscriber."""
+        return sum(self.send(c, text) for c in self.settings.telegram_chat_ids)
+
+    def send_execution(self, rec: dict) -> int:
+        return self.notify_owners(format_execution(rec))
+
+    def send_paper_event(self, ev: dict) -> int:
+        return self.notify_owners(format_paper_event(ev))
+
+    def send_realtime_alert(self, alert: dict) -> int:
+        return self.broadcast(format_realtime_alert(alert))
+
+    def send_alert(self, alert: dict) -> int:
+        return self.broadcast(format_alert(alert))
+
+    def send_signal(self, sig: dict) -> int:
+        return self.broadcast(format_signal(sig))
 
     def check_alerts(self, snap: dict) -> list[str]:
         """Alert on tickers newly entering the top N above the score threshold (once per day)."""
@@ -120,17 +241,67 @@ class TelegramNotifier:
         return fired
 
     # ---- commands (long polling) ----
-    def handle_command(self, chat_id: str, text: str) -> str:
+    def can_control(self, chat_id: str, user_id: str | None, chat_type: str) -> bool:
+        """Trading controls: a configured chat, and in groups only the listed admin users."""
+        if not self.is_owner(chat_id):
+            return False
+        if chat_type == "private":
+            return True
+        admins = {str(a) for a in self.settings.telegram_admin_ids}
+        return bool(user_id) and str(user_id) in admins
+
+    def handle_command(self, chat_id: str, text: str, user_id: str | None = None, chat_type: str = "private") -> str:
         cmd, _, arg = text.strip().partition(" ")
         cmd = cmd.split("@")[0].lower()
         snap = self.db.latest_snapshot()
         if cmd in ("/start", "/subscribe"):
             self.db.add_subscriber(chat_id)
             return ("✅ 已订阅 StockPulse！你会收到每日热门股简报和盘中异动提醒。\n\n"
-                    "/top 查看当前热门榜\n/stock TSLA 查看个股\n/stop 取消订阅")
+                    "/brief 盘前简报\n/portfolio 我的持仓\n/report 最新 AI 报告\n/signals 最近交易信号\n/alerts 生效中的提醒\n/account 模拟账户\n/pause /resume 暂停/恢复券商自动交易\n/top 实时热门榜\n/stock TSLA 查看个股\n/stop 取消订阅")
         if cmd in ("/stop", "/unsubscribe"):
             self.db.remove_subscriber(chat_id)
             return "已取消订阅。发送 /start 可重新订阅。"
+        if cmd == "/report":
+            rep = self.db.get_report()
+            return format_report(rep, title=REPORT_TITLE) if rep else "还没有生成过 AI 报告，到点会自动推送。"
+        if cmd == "/signals":
+            from .strategy.signals import describe_signal
+
+            sigs = self.db.list_signals(10)
+            if not sigs:
+                return "还没有交易信号。在网页的「策略」页启用策略后，新信号会自动推送。"
+            return "<b>最近的策略信号</b>\n" + "\n".join(
+                f"• {_e(describe_signal(s))} · {_e(s['strategy'])} · {_e(s['interval'])}" for s in sigs)
+        if cmd in ("/pause", "/resume"):
+            if not self.can_control(chat_id, user_id, chat_type):
+                return "只有 TELEGRAM_CHAT_IDS 里配置的私聊（群里需在 TELEGRAM_ADMIN_IDS 里的用户）可以控制自动交易。"
+            self.db.set_kv("broker_paused", "1" if cmd == "/pause" else "0")
+            return "⏸ 自动交易已暂停，不会再向券商下新单。发送 /resume 恢复。" if cmd == "/pause" else "▶️ 自动交易已恢复。"
+        if cmd in ("/brief", "/portfolio"):
+            if not self.is_owner(chat_id):   # contains your holdings: owners only, never subscribers
+                return "只有 TELEGRAM_CHAT_IDS 里配置的管理员可以查看（简报里有你的持仓）。"
+            fn = self.brief_fn if cmd == "/brief" else self.portfolio_fn
+            return fn() if fn else "功能未启用。"
+        if cmd == "/account":
+            if self.settings.telegram_chat_ids and not self.is_owner(chat_id):
+                return "只有管理员可以查看账户。"
+            cash = float(self.db.get_kv("paper_cash", "0") or 0)
+            init = float(self.db.get_kv("paper_initial", "0") or 0)
+            rows = self.db.query("SELECT symbol, qty, entry_price FROM paper_positions") if self.db.query(
+                "SELECT name FROM sqlite_master WHERE name='paper_positions'") else []
+            lines = [f"<b>模拟账户</b>  现金 {cash:,.2f}（初始 {init:,.0f}）"]
+            for r in rows:
+                lines.append(f"• {_e(r['symbol'])} {'多' if r['qty'] > 0 else '空'} {abs(r['qty']):g} @ {r['entry_price']:.2f}")
+            if not rows:
+                lines.append("当前没有持仓")
+            lines.append("网页「账户」页有完整净值和盈亏。")
+            return "\n".join(lines)
+        if cmd == "/alerts":
+            items = self.db.list_alerts(active_only=True)
+            if not items:
+                return "没有生效中的提醒。在图表页「提醒」里添加。"
+            return "<b>生效中的提醒</b>\n" + "\n".join(
+                f"• {_e(a['symbol'])} {_e(a['interval'])}：<code>{_e(a['condition'])}</code>" for a in items[:20])
         if cmd == "/top":
             return format_report(snap) if snap else "数据还在生成中，请稍后再试。"
         if cmd == "/stock":
@@ -141,7 +312,7 @@ class TelegramNotifier:
                 if r["ticker"] == t:
                     return format_stock_detail(r)
             return f"{_e(t)} 目前不在热门榜/关注列表中。"
-        return "可用命令：/start /top /stock TICKER /stop"
+        return "可用命令：/start /brief /portfolio /report /signals /alerts /account /pause /resume /top /stock TICKER /stop"
 
     def poll_forever(self) -> None:
         if not self.settings.telegram_enabled:
@@ -157,7 +328,8 @@ class TelegramNotifier:
                     text = msg.get("text", "")
                     if text.startswith("/"):
                         chat_id = str(msg["chat"]["id"])
-                        self.send(chat_id, self.handle_command(chat_id, text))
+                        user_id = str((msg.get("from") or {}).get("id") or "") or None
+                        self.send(chat_id, self.handle_command(chat_id, text, user_id, msg["chat"].get("type", "private")))
                 self.db.set_kv("tg_offset", str(offset))
             except Exception as exc:  # noqa: BLE001
                 log.warning("telegram polling error: %s", exc)
@@ -177,10 +349,16 @@ def _chunks(text: str) -> list[str]:
         return [text]
     out, cur = [], ""
     for line in text.split("\n"):
-        if len(cur) + len(line) + 1 > MAX_LEN:
+        while len(line) > MAX_LEN:          # a single over-long line: hard split
+            if cur:
+                out.append(cur)
+                cur = ""
+            out.append(line[:MAX_LEN])
+            line = line[MAX_LEN:]
+        if cur and len(cur) + len(line) + 1 > MAX_LEN:
             out.append(cur)
             cur = ""
         cur += line + "\n"
-    if cur:
+    if cur.strip():
         out.append(cur)
     return out

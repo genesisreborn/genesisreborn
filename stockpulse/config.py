@@ -25,6 +25,8 @@ def _bool(name: str, default: bool) -> bool:
 class Settings:
     telegram_bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     telegram_chat_ids: list[str] = field(default_factory=lambda: _list("TELEGRAM_CHAT_IDS"))
+    # user ids allowed to /pause /resume from a group chat (private chats in TELEGRAM_CHAT_IDS always can)
+    telegram_admin_ids: list[str] = field(default_factory=lambda: _list("TELEGRAM_ADMIN_IDS"))
 
     anthropic_api_key: str = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
     claude_model: str = field(default_factory=lambda: os.getenv("CLAUDE_MODEL", "claude-opus-5-5"))
@@ -32,8 +34,44 @@ class Settings:
     timezone: str = field(default_factory=lambda: os.getenv("TIMEZONE", "Asia/Shanghai"))
     refresh_minutes: int = field(default_factory=lambda: int(os.getenv("REFRESH_MINUTES", "15")))
     daily_report_times: list[str] = field(default_factory=lambda: _list("DAILY_REPORT_TIMES", "08:30,21:00"))
+    # weekday pre-market brief (portfolio, movers, today's earnings / macro data) to the Telegram owners; empty = off
+    brief_times: list[str] = field(default_factory=lambda: _list("BRIEF_TIMES", "20:45"))
     alert_top_n: int = field(default_factory=lambda: int(os.getenv("ALERT_TOP_N", "5")))
     alert_min_score: float = field(default_factory=lambda: float(os.getenv("ALERT_MIN_SCORE", "70")))
+
+    # Claude is called only when a report is generated; this blocks repeated
+    # manual triggers inside the window (scheduled reports always run).
+    report_cooldown_minutes: int = field(default_factory=lambda: int(os.getenv("REPORT_COOLDOWN_MINUTES", "30")))
+    # If set, every write/costly endpoint (reports, strategies, watchlist) requires
+    # "Authorization: Bearer <token>" or ?token=
+    report_api_token: str = field(default_factory=lambda: os.getenv("API_TOKEN", "") or os.getenv("REPORT_API_TOKEN", ""))
+    reports_dir: str = field(default_factory=lambda: os.getenv("REPORTS_DIR", "data/reports"))
+
+    # ---- charts / strategies ----
+    # Optional Massive (formerly Polygon.io) key for market data; yfinance is used otherwise.
+    massive_api_key: str = field(default_factory=lambda: os.getenv("MASSIVE_API_KEY", "") or os.getenv("POLYGON_API_KEY", ""))
+    massive_base_url: str = field(default_factory=lambda: os.getenv("MASSIVE_BASE_URL", "https://api.massive.com").rstrip("/"))
+    # How often to pull new bars and evaluate enabled strategies
+    signal_refresh_minutes: int = field(default_factory=lambda: int(os.getenv("SIGNAL_REFRESH_MINUTES", "5")))
+    commission_bps: float = field(default_factory=lambda: float(os.getenv("COMMISSION_BPS", "5")))
+    slippage_bps: float = field(default_factory=lambda: float(os.getenv("SLIPPAGE_BPS", "5")))
+
+    # ---- paper trading / real-time alerts ----
+    paper_capital: float = field(default_factory=lambda: float(os.getenv("PAPER_CAPITAL", "100000")))
+
+    # ---- broker (Alpaca) auto-trading: off unless BROKER=alpaca ----
+    broker: str = field(default_factory=lambda: os.getenv("BROKER", "").strip().lower())       # "" | "alpaca"
+    alpaca_key_id: str = field(default_factory=lambda: os.getenv("ALPACA_KEY_ID", ""))
+    alpaca_secret_key: str = field(default_factory=lambda: os.getenv("ALPACA_SECRET_KEY", ""))
+    alpaca_paper: bool = field(default_factory=lambda: _bool("ALPACA_PAPER", True))
+    live_trading_confirm: str = field(default_factory=lambda: os.getenv("LIVE_TRADING_CONFIRM", ""))
+    max_order_notional: float = field(default_factory=lambda: float(os.getenv("MAX_ORDER_NOTIONAL", "1000")))
+    max_daily_orders: int = field(default_factory=lambda: int(os.getenv("MAX_DAILY_ORDERS", "10")))
+    max_open_positions: int = field(default_factory=lambda: int(os.getenv("MAX_OPEN_POSITIONS", "5")))
+    allow_short: bool = field(default_factory=lambda: _bool("ALLOW_SHORT", False))
+    realtime_mode: str = field(default_factory=lambda: os.getenv("REALTIME_MODE", "auto").strip().lower())  # auto|ws|poll|off
+    realtime_poll_seconds: int = field(default_factory=lambda: int(os.getenv("REALTIME_POLL_SECONDS", "20")))
+    massive_ws_url: str = field(default_factory=lambda: os.getenv("MASSIVE_WS_URL", "wss://socket.massive.com/stocks"))
 
     db_path: str = field(default_factory=lambda: os.getenv("DB_PATH", "data/stockpulse.db"))
     watchlist: list[str] = field(default_factory=lambda: [t.upper() for t in _list("WATCHLIST", "AAPL,NVDA,TSLA,MSFT,AMZN")])
